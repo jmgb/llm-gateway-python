@@ -267,6 +267,37 @@ class TestGroqAdapter:
 
         assert response.output_text is None
 
+    async def test_it_maps_the_reasoning_breakdown_when_one_is_reported(self) -> None:
+        recorder = Recorder(
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="x"), finish_reason=None)],
+                usage=SimpleNamespace(
+                    prompt_tokens=11,
+                    completion_tokens=7,
+                    completion_tokens_details=SimpleNamespace(reasoning_tokens=3),
+                ),
+            )
+        )
+
+        response = await GroqAdapter(self._client(recorder)).generate(_request(), model="llama-x")
+
+        assert response.usage.output_tokens == 7
+        assert response.usage.reasoning_tokens == 3
+        assert response.usage.billable_output_tokens == 7
+
+    async def test_a_model_that_does_not_think_reports_no_breakdown(self) -> None:
+        recorder = Recorder(
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="x"), finish_reason=None)],
+                usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7),
+            )
+        )
+
+        response = await GroqAdapter(self._client(recorder)).generate(_request(), model="llama-x")
+
+        assert response.usage.reasoning_tokens is None
+        assert response.usage.visible_output_tokens == 7
+
 
 class TestOpenRouterAdapter:
     def _client(self, recorder: Recorder) -> Any:

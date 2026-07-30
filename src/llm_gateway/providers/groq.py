@@ -79,5 +79,12 @@ def _usage(raw: Any) -> TokenUsage:
         return TokenUsage.unknown()
     return TokenUsage(
         input_tokens=getattr(raw, "prompt_tokens", None),
+        # Chat Completions counts reasoning inside completion_tokens, so the
+        # breakdown changes no amount. It is read anyway: without it a thinking
+        # model looks like it returned every token it was billed for. Models
+        # that do not think report no details, and the breakdown stays unknown.
         output_tokens=getattr(raw, "completion_tokens", None),
+        reasoning_tokens=getattr(
+            getattr(raw, "completion_tokens_details", None), "reasoning_tokens", None
+        ),
     )
