@@ -7,6 +7,23 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [0.4.0] — 2026-07-30
+
+### Fixed
+
+- **`TimeoutPolicy.total_seconds` is now a total.** It was only ever applied
+  per attempt, so a 200s "total" with two retries allowed roughly 400s plus
+  backoff. The whole call — every attempt, every retry, every backoff pause —
+  is now bounded by it, and exceeding it raises `AllAttemptsFailed` carrying
+  the attempts already made. `per_attempt_seconds_override` still bounds each
+  individual try.
+
+  This is a behaviour change: calls that previously ran past their declared
+  budget will now be cut off at it. That is the point.
+
+  Found in code review. A value that names itself a total and is not one is
+  exactly the class of bug this package exists to prevent.
+
 ## [0.3.1] — 2026-07-30
 
 ### Fixed

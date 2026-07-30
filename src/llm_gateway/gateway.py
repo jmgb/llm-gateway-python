@@ -72,9 +72,27 @@ class LLMGateway:
         self._alerts = alert_sink or NullAlertSink()
 
     async def generate(self, request: LLMRequest) -> LLMResult:
-        """Run the request to completion, or raise a typed error."""
-        started = time.perf_counter()
+        """Run the request to completion, or raise a typed error.
+
+        ``timeout_policy.total_seconds`` bounds the **whole** call: every
+        attempt, every retry and every backoff pause together. A budget that
+        only applied per attempt would let two retries spend twice what the
+        caller authorised.
+        """
         attempts: list[Attempt] = []
+        try:
+            async with asyncio.timeout(request.timeout_policy.total_seconds):
+                return await self._run(request, attempts)
+        except TimeoutError:
+            self._report_failure(request, attempts)
+            raise AllAttemptsFailed(
+                f"the call exceeded its total budget of "
+                f"{request.timeout_policy.total_seconds}s after {len(attempts)} attempt(s)",
+                attempts=tuple(attempts),
+            ) from None
+
+    async def _run(self, request: LLMRequest, attempts: list[Attempt]) -> LLMResult:
+        started = time.perf_counter()
 
         # Resolve every model up front so an unroutable fallback fails before
         # any money is spent, not halfway through a degraded call.
@@ -122,8 +140,25 @@ class LLMGateway:
             self._events.emit("llm_call_succeeded", _event_fields(request, execution, cost))
             return LLMResult(output=output, usage=usage, execution=execution, cost=cost)
 
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        self._report_failure(request, attempts, started=started)
+        raise AllAttemptsFailed(
+            f"all {len(attempts)} attempt(s) failed for model {request.model!r}",
+            attempts=tuple(attempts),
+        )
+
+    def _report_failure(
+        self,
+        request: LLMRequest,
+        attempts: list[Attempt],
+        *,
+        started: float | None = None,
+    ) -> None:
+        """Emit accounting for a call that never produced a result.
+
+        A failure still spent money, so it is reported exactly like a success.
+        """
         usage, cost = _aggregate(attempts)
+        elapsed_ms = int((time.perf_counter() - started) * 1000) if started is not None else 0
         failed = Execution(
             requested_model=request.model,
             model_used=attempts[-1].model if attempts else request.model,
@@ -143,10 +178,6 @@ class LLMGateway:
             )
         )
         self._events.emit("llm_call_failed", _event_fields(request, failed, cost))
-        raise AllAttemptsFailed(
-            f"all {len(attempts)} attempt(s) failed for model {request.model!r}",
-            attempts=tuple(attempts),
-        )
 
     async def _attempt_model(
         self,
