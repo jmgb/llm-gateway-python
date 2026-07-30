@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- Source of the repository social preview (Settings → Social preview).
+     Render the page at 1280×640 with deviceScaleFactor 2 and upload the
+     resulting 2560×1280 PNG. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; }
+  body {
+    font-family: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, Menlo, monospace;
+    background: #0d1117;
+    color: #e6edf3;
+    position: relative;
+    overflow: hidden;
+  }
+  .glow {
+    position: absolute;
+    width: 900px; height: 900px;
+    left: 50%; top: -520px;
+    transform: translateX(-50%);
+    background: radial-gradient(circle, rgba(63, 185, 80, 0.10) 0%, transparent 60%);
+  }
+  .frame {
+    position: absolute;
+    inset: 72px 88px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .repo { color: #7d8590; font-size: 20px; letter-spacing: 0.02em; }
+  .title { font-size: 64px; font-weight: 700; letter-spacing: -0.01em; margin-top: 26px; }
+  .tagline { font-size: 27px; color: #a5b0bb; margin-top: 22px; line-height: 1.5; }
+  .tagline em { font-style: normal; color: #e6edf3; }
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    font-size: 22px;
+    margin-top: 8px;
+  }
+  .node {
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 12px 20px;
+    color: #a5b0bb;
+    background: #161b22;
+    white-space: nowrap;
+  }
+  .node.core {
+    border-color: #3fb950;
+    color: #3fb950;
+    background: rgba(63, 185, 80, 0.08);
+    font-weight: 700;
+  }
+  .arrow { color: #565e68; font-size: 24px; }
+  .meta {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    color: #7d8590;
+    font-size: 20px;
+  }
+  .meta .dot { color: #3d444d; }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="frame">
+    <div>
+      <div class="repo">jmgb / llm-gateway-python</div>
+      <div class="title">neutral-llm-gateway</div>
+      <div class="tagline">A small, honest gateway for LLM calls.<br>
+        Usage, cost and fallbacks that <em>refuse to lie to you</em>.</div>
+    </div>
+    <div class="flow">
+      <span class="node">your application</span>
+      <span class="arrow">→</span>
+      <span class="node">your facade</span>
+      <span class="arrow">→</span>
+      <span class="node core">llm_gateway</span>
+      <span class="arrow">→</span>
+      <span class="node">provider SDK</span>
+    </div>
+    <div class="meta">
+      <span>Python 3.11+</span><span class="dot">·</span>
+      <span>mypy --strict</span><span class="dot">·</span>
+      <span>Pydantic v2</span><span class="dot">·</span>
+      <span>OpenAI / Gemini / Groq</span><span class="dot">·</span>
+      <span>MIT</span>
+    </div>
+  </div>
+</body>
+</html>
