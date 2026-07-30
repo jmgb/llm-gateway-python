@@ -42,6 +42,13 @@ class TestErrorTaxonomy:
 
         assert "neutral-llm-gateway[groq]" in str(error)
 
+    def test_the_hint_does_not_assume_a_package_manager(self) -> None:
+        """Telling a uv project to run `pip install` would bypass its lockfile."""
+        message = str(ProviderNotInstalled.for_provider("groq"))
+
+        assert "uv add" in message
+        assert "pip install" in message
+
 
 class TestRetryPolicy:
     def test_disabled_allows_a_single_attempt(self) -> None:

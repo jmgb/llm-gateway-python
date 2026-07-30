@@ -34,9 +34,15 @@ class ProviderNotInstalled(ConfigurationError):
 
     @classmethod
     def for_provider(cls, provider: str) -> ProviderNotInstalled:
+        """Name the extra without assuming how the caller installs things.
+
+        Telling a uv-managed project to run ``pip install`` would install
+        outside its lockfile, so both commands are offered rather than one.
+        """
+        target = f"neutral-llm-gateway[{provider}]"
         return cls(
-            f"provider {provider!r} is not installed; "
-            f"install it with: pip install 'neutral-llm-gateway[{provider}]'"
+            f"provider {provider!r} is not installed; add the {provider!r} extra: "
+            f'uv add "{target}"  (or: pip install "{target}")'
         )
 
 

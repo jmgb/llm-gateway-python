@@ -24,6 +24,12 @@ slowly becoming the thousand-line function it was extracted from.
 If you need something only you need, the ports (`UsageSink`, `EventSink`,
 `AlertSink`, `PriceCatalog`) are there so you don't have to fork.
 
+## Tooling
+
+This project uses [uv](https://docs.astral.sh/uv/). Every command below assumes
+it; `uv sync` creates the environment and installs from `uv.lock`, so there is
+no virtualenv to activate by hand.
+
 ## Non-negotiables
 
 Changes that break these will be declined, however convenient:

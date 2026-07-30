@@ -7,6 +7,19 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [0.3.1] — 2026-07-30
+
+### Fixed
+
+- The "provider extra not installed" error no longer assumes pip. Telling a
+  uv-managed project to run `pip install` would install outside its lockfile,
+  so the hint now offers `uv add` and `pip install` and names the extra itself.
+
+### Added
+
+- Install instructions for uv, including the `[tool.uv.sources]` form and the
+  portable PEP 508 alternative for projects that do not use uv.
+
 ## [0.3.0] — 2026-07-30
 
 Prepared for public release.

@@ -52,16 +52,43 @@ what it does not know.
 
 ## Install
 
-Provider SDKs are **optional extras**. Install only what you call:
+Provider SDKs are **optional extras**. Install only what you call.
+
+Not on PyPI yet — install from the repository, pinning a tag:
 
 ```bash
-pip install "neutral-llm-gateway[gemini]"
-pip install "neutral-llm-gateway[openai,gemini,groq]"
+# uv
+uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.3.1"
+
+# pip
+pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.3.1"
 ```
 
+Available extras: `openai`, `gemini`, `groq`, `all`. Combine them as
+`[openai,gemini]`.
+
 Importing the package with no extra installed works by design; asking for a
-provider you have not installed raises a typed error naming the exact install
-command.
+provider you have not installed raises a typed error naming the exact extra.
+
+### With uv
+
+`uv add` records the dependency and pins the tag to an exact commit in
+`uv.lock`, so builds stay reproducible even if the tag is ever moved:
+
+```toml
+[project]
+dependencies = ["neutral-llm-gateway[gemini]"]
+
+[tool.uv.sources]
+neutral-llm-gateway = { git = "https://github.com/jmgb/llm-gateway-python.git", rev = "v0.3.1" }
+```
+
+To upgrade, run `uv add` again with the new tag. `uv sync --locked` works in CI
+with **no credentials**, since the repository is public.
+
+If a consuming project does not use uv, the portable PEP 508 form works
+everywhere — put the whole URL directly in `dependencies` instead of using
+`[tool.uv.sources]`.
 
 ## Use
 
