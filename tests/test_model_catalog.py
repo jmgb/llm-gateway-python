@@ -41,6 +41,20 @@ class TestIdentity:
         for model_id, info in MODEL_CATALOG.items():
             assert info.id == model_id
 
+    def test_only_openai_56_models_declare_reasoning_efforts(self) -> None:
+        expected = ("none", "low", "medium", "high", "xhigh", "max")
+
+        for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.provider == "openai"
+            assert info.reasoning_efforts == expected
+
+        oss = lookup_model("openai/gpt-oss-120b")
+        assert oss is not None
+        assert oss.provider == "groq"
+        assert oss.reasoning_efforts == ()
+
 
 class TestProviderRouting:
     def test_a_catalogued_model_routes_by_its_declared_provider(self) -> None:
@@ -64,6 +78,20 @@ class TestProviderRouting:
 
 
 class TestBuiltinPrices:
+    def test_luna_uses_the_current_published_rates(self) -> None:
+        luna = lookup_model("gpt-5.6-luna")
+
+        assert luna is not None
+        assert luna.input_usd_per_mtok == Decimal("0.20")
+        assert luna.output_usd_per_mtok == Decimal("1.20")
+
+    def test_terra_uses_the_current_published_rates(self) -> None:
+        terra = lookup_model("gpt-5.6-terra")
+
+        assert terra is not None
+        assert terra.input_usd_per_mtok == Decimal("2")
+        assert terra.output_usd_per_mtok == Decimal("12")
+
     def test_the_builtin_catalog_prices_a_known_model(self) -> None:
         catalog = builtin_price_catalog()
 

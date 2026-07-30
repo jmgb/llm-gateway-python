@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from llm_gateway import (
     AllAttemptsFailed,
     AuthenticationError,
+    ConfigurationError,
     CostMeasurement,
     FallbackPolicy,
     LLMGateway,
@@ -238,6 +239,43 @@ class TestRouting:
 
         with pytest.raises(UnknownModelError):
             await gateway.generate(_request(model="unknown-model-xyz"))
+
+
+class TestReasoningEffortRouting:
+    async def test_reasoning_effort_is_rejected_for_groq_oss(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "groq"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("openai/gpt-oss-",))
+        gateway = LLMGateway(registry=registry)
+
+        with pytest.raises(ConfigurationError, match="reasoning_effort"):
+            await gateway.generate(_request(model="openai/gpt-oss-120b", reasoning_effort="low"))
+
+        assert adapter.calls == []
+
+    async def test_reasoning_effort_is_rejected_for_other_openai_models(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "openai"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("gpt-",))
+        gateway = LLMGateway(registry=registry)
+
+        with pytest.raises(ConfigurationError, match="reasoning_effort"):
+            await gateway.generate(_request(model="gpt-5.2-2025-12-11", reasoning_effort="medium"))
+
+        assert adapter.calls == []
+
+    async def test_reasoning_effort_is_allowed_for_openai_56_models(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "openai"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("gpt-5.6-",))
+        gateway = LLMGateway(registry=registry)
+
+        await gateway.generate(_request(model="gpt-5.6-terra", reasoning_effort="max"))
+
+        assert adapter.calls == ["gpt-5.6-terra"]
 
 
 class TestFailureAccounting:

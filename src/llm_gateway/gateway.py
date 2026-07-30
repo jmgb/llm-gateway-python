@@ -28,13 +28,14 @@ from llm_gateway.contracts import (
 )
 from llm_gateway.errors import (
     AllAttemptsFailed,
+    ConfigurationError,
     LLMGatewayError,
     ProviderError,
     ProviderTimeoutError,
     SchemaValidationError,
 )
 from llm_gateway.json_payload import parse_json_payload
-from llm_gateway.models import builtin_price_catalog
+from llm_gateway.models import builtin_price_catalog, lookup_model
 from llm_gateway.ports import (
     AlertSink,
     EventSink,
@@ -99,6 +100,7 @@ class LLMGateway:
         plan = [request.model, *request.fallback_policy.models]
         for model in plan:
             self._registry.resolve(model)
+        _validate_reasoning_effort(request, plan)
 
         for model in plan:
             adapter = self._registry.resolve(model)
@@ -262,6 +264,21 @@ def _record_attempt(
         error_type=error_type,
         billable=billable,
     )
+
+
+def _validate_reasoning_effort(request: LLMRequest, plan: list[str]) -> None:
+    """Reject reasoning options before any provider call can spend money."""
+    effort = request.reasoning_effort
+    if effort is None:
+        return
+
+    for model in plan:
+        info = lookup_model(model)
+        if info is None or info.provider != "openai" or effort not in info.reasoning_efforts:
+            raise ConfigurationError(
+                f"reasoning_effort={effort!r} is only supported for the OpenAI 5.6 "
+                f"models sol, terra, and luna; model {model!r} cannot use it"
+            )
 
 
 def _aggregate(attempts: list[Attempt]) -> tuple[TokenUsage, Cost]:

@@ -30,17 +30,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import ModelRate, StaticPriceCatalog
 
-CATALOG_VERSION = "2026-07-30"
+CATALOG_VERSION = "2026-07-31"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
+OPENAI_56_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
 
 
 @dataclass(frozen=True, slots=True)
 class ModelInfo:
-    """One model: who serves it, what it costs, whether it still should be used."""
+    """One model: provider, price, and explicitly supported request options."""
 
     id: str
     provider: Provider
@@ -49,6 +58,7 @@ class ModelInfo:
     deprecated: bool = False
     notes: str = ""
     aliases: tuple[str, ...] = field(default=())
+    reasoning_efforts: tuple[ReasoningEffort, ...] = field(default=())
 
     @property
     def rate(self) -> ModelRate:
@@ -67,6 +77,7 @@ def _m(
     *,
     deprecated: bool = False,
     notes: str = "",
+    reasoning_efforts: tuple[ReasoningEffort, ...] = (),
 ) -> ModelInfo:
     return ModelInfo(
         id=model_id,
@@ -75,6 +86,7 @@ def _m(
         output_usd_per_mtok=Decimal(output_price),
         deprecated=deprecated,
         notes=notes,
+        reasoning_efforts=reasoning_efforts,
     )
 
 
@@ -82,9 +94,28 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # ---- OpenAI ---------------------------------------------------------
     _m("gpt-5.1-2025-11-13", "openai", "1.25", "10.00"),
     _m("gpt-5.2-2025-12-11", "openai", "1.75", "14.00"),
-    _m("gpt-5.6-sol", "openai", "5.00", "30.00"),
-    _m("gpt-5.6-terra", "openai", "2.50", "15.00"),
-    _m("gpt-5.6-luna", "openai", "1.00", "6.00"),
+    _m(
+        "gpt-5.6-sol",
+        "openai",
+        "5.00",
+        "30.00",
+        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+    ),
+    _m(
+        "gpt-5.6-terra",
+        "openai",
+        "2.00",
+        "12.00",
+        notes="max output 128K tokens",
+        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+    ),
+    _m(
+        "gpt-5.6-luna",
+        "openai",
+        "0.20",
+        "1.20",
+        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+    ),
     _m("gpt-realtime-2025-08-28", "openai", "32.00", "64.00", notes="realtime audio"),
     _m("gpt-realtime-mini-2025-10-06", "openai", "10.00", "20.00", notes="realtime audio"),
     _m("gpt-realtime-mini-2025-12-15", "openai", "10.00", "20.00", notes="realtime audio"),

@@ -7,6 +7,17 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [Unreleased]
+
+### Changed
+
+- Updated `gpt-5.6-luna` pricing to USD 0.20 per input MTok and USD 1.20 per
+  output MTok.
+- Updated `gpt-5.6-terra` pricing to USD 2.00 per input MTok and USD 12.00 per
+  output MTok; recorded its 128K-token maximum output.
+- Restricted reasoning efforts (`none`, `low`, `medium`, `high`, `xhigh`, and
+  `max`) to the OpenAI `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` models.
+
 ## [0.5.0] — 2026-07-30
 
 ### Added

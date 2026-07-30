@@ -148,6 +148,16 @@ class TestOpenAIAdapter:
 
         assert "temperature" not in recorder.kwargs
 
+    @pytest.mark.parametrize("effort", ("none", "low", "medium", "high", "xhigh", "max"))
+    async def test_it_forwards_each_supported_reasoning_effort(self, effort: str) -> None:
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort=effort), model="gpt-5.6-terra"
+        )
+
+        assert recorder.kwargs["reasoning"] == {"effort": effort}
+
 
 class TestGeminiAdapter:
     def _client(self, recorder: Recorder) -> Any:
