@@ -82,8 +82,21 @@ without the fix.
 5. Tests with a fake client, covering usage mapping and the "usage not
    reported" case.
 
-Before adding one, check whether the provider exposes an OpenAI-compatible API.
-If it does, it is a `base_url` on the existing adapter, not a new provider.
+An OpenAI-compatible API is **not** on its own a reason to skip all this. It
+decides the transport, not the provider. Ask instead:
+
+- Does it speak the Responses API, or Chat Completions? The OpenAI adapter
+  translates to the former only.
+- Can it honestly declare the OpenAI adapter's capabilities? An aggregator
+  cannot promise on behalf of every model it routes to.
+- Does it need its own prices, or its own name in the catalogue?
+
+Answer no to any of those and it is a provider, however familiar the wire
+format. OpenRouter is the worked example: it reuses the `openai` SDK as a
+transport and is a separate adapter in every other respect. What *is* just a
+`base_url` on the existing adapter is the same API somewhere else — an Azure
+deployment, vLLM, your own gateway — widened with
+`build_registry(extra_openai_prefixes=...)`.
 
 ## Adding or updating a model price
 
