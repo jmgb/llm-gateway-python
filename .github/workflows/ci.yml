@@ -15,8 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor is the oldest consumer in the fleet; the ceiling is what
-        # most of them actually run.
+        # The supported floor and the current stable release.
         python-version: ["3.11", "3.13"]
 
     env:

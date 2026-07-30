@@ -1,10 +1,24 @@
 [project]
 name = "neutral-llm-gateway"
-version = "0.4.0"
+version = "0.4.1"
 description = "Neutral LLM gateway: typed contracts, provider adapters and explicit retry, fallback, usage and cost accounting."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
+authors = [{ name = "Miguel" }]
+keywords = ["llm", "gateway", "openai", "gemini", "groq", "cost-accounting", "retry", "fallback"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.10,<3",
 ]
@@ -18,6 +32,11 @@ all = [
     "google-genai>=2.11,<3",
     "groq>=1.4,<2",
 ]
+
+[project.urls]
+Repository = "https://github.com/jmgb/llm-gateway-python"
+Changelog = "https://github.com/jmgb/llm-gateway-python/blob/main/CHANGELOG.md"
+Issues = "https://github.com/jmgb/llm-gateway-python/issues"
 
 [build-system]
 requires = ["hatchling"]

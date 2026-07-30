@@ -1,5 +1,11 @@
 # neutral-llm-gateway
 
+[![CI](https://github.com/jmgb/llm-gateway-python/actions/workflows/ci.yml/badge.svg)](https://github.com/jmgb/llm-gateway-python/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
+[![mypy: strict](https://img.shields.io/badge/mypy-strict-blue)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 A small, honest gateway for LLM calls: typed contracts, thin provider adapters,
 and accounting of retries, fallbacks, tokens and cost that refuses to lie to
 you.
@@ -58,10 +64,10 @@ Not on PyPI yet — install from the repository, pinning a tag:
 
 ```bash
 # uv
-uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.3.1"
+uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.4.1"
 
 # pip
-pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.3.1"
+pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.4.1"
 ```
 
 Available extras: `openai`, `gemini`, `groq`, `all`. Combine them as
@@ -80,7 +86,7 @@ provider you have not installed raises a typed error naming the exact extra.
 dependencies = ["neutral-llm-gateway[gemini]"]
 
 [tool.uv.sources]
-neutral-llm-gateway = { git = "https://github.com/jmgb/llm-gateway-python.git", rev = "v0.3.1" }
+neutral-llm-gateway = { git = "https://github.com/jmgb/llm-gateway-python.git", rev = "v0.4.1" }
 ```
 
 To upgrade, run `uv add` again with the new tag. `uv sync --locked` works in CI

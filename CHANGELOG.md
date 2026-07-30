@@ -7,6 +7,21 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [0.4.1] — 2026-07-30
+
+### Fixed
+
+- **The wheel now ships a `py.typed` marker (PEP 561).** The code was always
+  fully typed and checked under `mypy --strict`, but without the marker a
+  consumer's type checker silently treated every import from `llm_gateway` as
+  `Any` — annotations that look like a guarantee but aren't is exactly what
+  this package is against. Types are now part of the public contract.
+
+### Added
+
+- Package metadata: classifiers (including `Typing :: Typed`), keywords and
+  repository URLs in `pyproject.toml`.
+
 ## [0.4.0] — 2026-07-30
 
 ### Fixed
