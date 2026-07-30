@@ -51,7 +51,7 @@ gateway = LLMGateway(
         openai_client=create_openai_client(api_key=settings.OPENAI_API_KEY),
         gemini_client=create_gemini_client(api_key=settings.GEMINI_API_KEY),
     ),
-    price_catalog=MyPriceCatalog(),   # yours, versioned, reconcilable
+    price_catalog=MyPriceCatalog(),  # yours, versioned, reconcilable
     usage_sink=MyLedger(),
 )
 ```
@@ -77,8 +77,8 @@ Once the facade is stable, individual features can move from the flattened dict
 to the typed result:
 
 ```python
-respuesta["tokens_in"]        # legacy
-result.usage.input_tokens     # typed — and None means "not reported"
+respuesta["tokens_in"]  # legacy
+result.usage.input_tokens  # typed — and None means "not reported"
 ```
 
 That migration is optional and incremental. It is not part of adopting the

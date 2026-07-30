@@ -83,10 +83,14 @@ def test_no_module_reads_the_environment() -> None:
 
 
 def test_the_public_api_is_explicit() -> None:
+    """Ordering is ruff's job (RUF022); correctness is this test's job."""
     import llm_gateway
 
-    assert llm_gateway.__all__ == sorted(llm_gateway.__all__), "__all__ must stay sorted"
-    for name in llm_gateway.__all__:
+    exported = llm_gateway.__all__
+    duplicates = {name for name in exported if exported.count(name) > 1}
+
+    assert duplicates == set(), f"duplicated exports: {duplicates}"
+    for name in exported:
         assert hasattr(llm_gateway, name), f"{name} is exported but missing"
 
 

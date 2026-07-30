@@ -34,6 +34,7 @@ from llm_gateway.errors import (
     SchemaValidationError,
 )
 from llm_gateway.json_payload import parse_json_payload
+from llm_gateway.models import builtin_price_catalog
 from llm_gateway.ports import (
     AlertSink,
     EventSink,
@@ -43,7 +44,7 @@ from llm_gateway.ports import (
     UsageSink,
     execution_to_record,
 )
-from llm_gateway.pricing import Cost, CostMeasurement, NullPriceCatalog, PriceCatalog
+from llm_gateway.pricing import Cost, CostMeasurement, PriceCatalog
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import TokenUsage
@@ -62,7 +63,10 @@ class LLMGateway:
         alert_sink: AlertSink | None = None,
     ) -> None:
         self._registry = registry
-        self._prices = price_catalog or NullPriceCatalog()
+        # Default to the shared catalogue: a consumer that says nothing about
+        # prices gets real, versioned ones rather than silent UNAVAILABLE.
+        # Passing an explicit catalogue still wins, for negotiated rates.
+        self._prices = price_catalog or builtin_price_catalog()
         self._usage_sink = usage_sink or NullUsageSink()
         self._events = event_sink or NullEventSink()
         self._alerts = alert_sink or NullAlertSink()

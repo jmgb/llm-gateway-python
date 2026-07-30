@@ -74,13 +74,13 @@ result = await gateway.generate(
     )
 )
 
-result.output                    # Answer instance — no metadata mixed in
-result.usage.input_tokens        # None means "not reported", not zero
-result.cost.amount_usd           # None when unavailable, never a fake 0
-result.cost.measurement          # ACTUAL | ESTIMATED | UNAVAILABLE
-result.execution.model_used      # what actually answered
-result.execution.fallback_used   # a fallback is never silent
-result.execution.attempts        # every attempt, including the failed ones
+result.output  # Answer instance — no metadata mixed in
+result.usage.input_tokens  # None means "not reported", not zero
+result.cost.amount_usd  # None when unavailable, never a fake 0
+result.cost.measurement  # ACTUAL | ESTIMATED | UNAVAILABLE
+result.execution.model_used  # what actually answered
+result.execution.fallback_used  # a fallback is never silent
+result.execution.attempts  # every attempt, including the failed ones
 ```
 
 ## The guarantees

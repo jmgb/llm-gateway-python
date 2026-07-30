@@ -8,8 +8,13 @@ cost attribution, so switching models is always an opt-in decision.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import TYPE_CHECKING, cast
 
 from llm_gateway.errors import LLMGatewayError
+
+if TYPE_CHECKING:
+    from llm_gateway.models import ModelInfo
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +66,40 @@ class FallbackPolicy:
     @classmethod
     def models_in_order(cls, *models: str) -> FallbackPolicy:
         return cls(models=tuple(models))
+
+    @classmethod
+    def cheaper_than(cls, model: str, *, limit: int = 1) -> FallbackPolicy:
+        """Cheaper models from the same provider, cheapest-first.
+
+        Derived from the shared catalogue, so the chain updates when prices do.
+        Same-provider on purpose: falling back across providers changes the
+        credential, the capability set and the failure mode at the worst
+        possible moment.
+
+        This builds a *candidate* chain; whether degrading to a cheaper model
+        is acceptable is a product decision, and stays with the caller.
+        """
+        from llm_gateway.models import lookup_model, models_by_provider
+
+        current = lookup_model(model)
+        if current is None:
+            raise ValueError(
+                f"{model!r} is not in the catalogue, so no fallback can be derived from it"
+            )
+
+        def total_price(candidate: object) -> Decimal:
+            info = cast("ModelInfo", candidate)
+            return info.input_usd_per_mtok + info.output_usd_per_mtok
+
+        cheaper = [
+            candidate
+            for candidate in models_by_provider(current.provider)
+            if not candidate.deprecated
+            and candidate.id != current.id
+            and total_price(candidate) < total_price(current)
+        ]
+        cheaper.sort(key=total_price, reverse=True)
+        return cls(models=tuple(info.id for info in cheaper[:limit]))
 
     @property
     def enabled(self) -> bool:

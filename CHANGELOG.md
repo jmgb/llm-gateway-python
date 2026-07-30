@@ -7,6 +7,40 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [0.2.0] — 2026-07-30
+
+The shared model catalogue. Prices now live here, so they are updated once
+instead of once per consumer.
+
+### Added
+
+- `llm_gateway.models`: **46 models** with provider and price, merged from the
+  two existing catalogues in the fleet. `CATALOG_VERSION` identifies the table,
+  and every recorded amount carries it.
+- `builtin_price_catalog()` — used by `LLMGateway` **by default**, so a consumer
+  that says nothing about prices gets real, versioned ones instead of
+  `UNAVAILABLE`. An explicit catalogue still wins.
+- `builtin_price_catalog(overrides=..., version=...)` for negotiated rates.
+  Supplying overrides without a version is rejected: an amount must never be
+  attributed to a catalogue version that did not produce it.
+- `resolve_provider()` and catalogue-first routing in `ProviderRegistry`. Model
+  ids can lie about their provider — `openai/gpt-oss-120b` is served by Groq —
+  so the declared provider wins over any prefix rule.
+- `FallbackPolicy.cheaper_than(model, limit=...)` — derives a same-provider,
+  cheapest-first chain from the catalogue, skipping deprecated models. Whether
+  degrading is acceptable remains the caller's decision.
+- Test forbidding duplicate model ids. A duplicate key silently discards one of
+  the two declared prices, which is a real defect observed in the fleet.
+
+### Notes
+
+- Prices are declared in USD per million tokens and consumed as microUSD per
+  token. Those are the same number; a test asserts the conversion is the
+  identity.
+- Audio/STT pricing (billed per hour, with a provider minimum) is **not**
+  included: it is a different cost model, no gateway capability produces it,
+  and only one consumer has it today. It moves here when that consumer migrates.
+
 ## [0.1.0] — 2026-07-30
 
 First extraction. Nothing is migrated yet: this release exists so a first

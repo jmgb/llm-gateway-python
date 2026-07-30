@@ -34,6 +34,15 @@ from llm_gateway.errors import (
     UnknownModelError,
 )
 from llm_gateway.gateway import LLMGateway
+from llm_gateway.models import (
+    CATALOG_VERSION,
+    MODEL_CATALOG,
+    ModelInfo,
+    builtin_price_catalog,
+    lookup_model,
+    models_by_provider,
+    resolve_provider,
+)
 from llm_gateway.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
 from llm_gateway.ports import (
     AlertSink,
@@ -57,6 +66,8 @@ from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import TokenUsage
 
 __all__ = [
+    "CATALOG_VERSION",
+    "MODEL_CATALOG",
     "AlertSink",
     "AllAttemptsFailed",
     "Attempt",
@@ -74,6 +85,7 @@ __all__ = [
     "LLMRequest",
     "LLMResult",
     "Message",
+    "ModelInfo",
     "ModelRate",
     "NullAlertSink",
     "NullEventSink",
@@ -102,4 +114,8 @@ __all__ = [
     "UnknownModelError",
     "UsageRecord",
     "UsageSink",
+    "builtin_price_catalog",
+    "lookup_model",
+    "models_by_provider",
+    "resolve_provider",
 ]

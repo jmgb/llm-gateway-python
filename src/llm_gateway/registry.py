@@ -7,6 +7,7 @@ and extend, not a chain of substring guesses buried in a 900-line function.
 from __future__ import annotations
 
 from llm_gateway.errors import UnknownModelError
+from llm_gateway.models import resolve_provider
 from llm_gateway.providers.base import ProviderAdapter
 
 
@@ -26,9 +27,25 @@ class ProviderRegistry:
         self._by_prefix.sort(key=lambda pair: len(pair[0]), reverse=True)
 
     def resolve(self, model: str) -> ProviderAdapter:
+        """Resolve a model to its adapter.
+
+        The shared catalogue is consulted first, because a model id can lie
+        about its provider: ``openai/gpt-oss-120b`` is served by Groq. Prefix
+        registrations only decide models the catalogue does not know.
+        """
+        declared = resolve_provider(model)
+        if declared is not None and declared in self._by_name:
+            return self._by_name[declared]
+
         for prefix, adapter in self._by_prefix:
             if model.startswith(prefix):
                 return adapter
+
+        if declared is not None:
+            raise UnknownModelError(
+                f"model {model!r} is served by provider {declared!r}, "
+                f"which has no registered client; registered: {self.provider_names}"
+            )
         raise UnknownModelError(
             f"no provider is registered for model {model!r}; "
             f"known prefixes: {sorted({p for p, _ in self._by_prefix})}"
