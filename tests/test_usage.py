@@ -25,10 +25,16 @@ def test_partial_usage_is_incomplete() -> None:
     assert partial.input_tokens == 100
 
 
-def test_billable_output_includes_reasoning_tokens() -> None:
+def test_reasoning_tokens_are_a_breakdown_of_output_not_an_addend() -> None:
     usage = TokenUsage(input_tokens=10, output_tokens=20, reasoning_tokens=5)
 
-    assert usage.billable_output_tokens == 25
+    assert usage.billable_output_tokens == 20, "adding them again would bill them twice"
+
+
+def test_reasoning_tokens_never_exceed_the_output_they_are_part_of() -> None:
+    usage = TokenUsage(input_tokens=10, output_tokens=20, reasoning_tokens=5)
+
+    assert usage.visible_output_tokens == 15
 
 
 def test_billable_input_includes_retrieved_documents() -> None:

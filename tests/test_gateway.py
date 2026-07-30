@@ -72,14 +72,14 @@ def _gateway(adapter: FakeAdapter) -> LLMGateway:
 
 
 def _request(model: str = "fast", **kwargs: object) -> LLMRequest:
-    return LLMRequest(model=model, messages=(Message("user", "hola"),), **kwargs)  # type: ignore[arg-type]
+    return LLMRequest(model=model, messages=(Message("user", "hello"),), **kwargs)  # type: ignore[arg-type]
 
 
 class TestHappyPath:
     async def test_it_returns_the_provider_text(self) -> None:
-        result = await _gateway(FakeAdapter(_ok("respuesta"))).generate(_request())
+        result = await _gateway(FakeAdapter(_ok("an answer"))).generate(_request())
 
-        assert result.output == "respuesta"
+        assert result.output == "an answer"
 
     async def test_it_records_exactly_one_attempt(self) -> None:
         result = await _gateway(FakeAdapter(_ok("x"))).generate(_request())

@@ -62,12 +62,16 @@ def test_retrieved_documents_are_billed_as_input() -> None:
     assert cost.microusd == 600
 
 
-def test_reasoning_tokens_are_billed_as_output() -> None:
-    usage = TokenUsage(input_tokens=0, output_tokens=100, reasoning_tokens=100)
+def test_reasoning_tokens_are_already_inside_the_output_count() -> None:
+    thinking = CATALOG.estimate(
+        "test-model", TokenUsage(input_tokens=0, output_tokens=100, reasoning_tokens=100)
+    )
+    without_breakdown = CATALOG.estimate(
+        "test-model", TokenUsage(input_tokens=0, output_tokens=100)
+    )
 
-    cost = CATALOG.estimate("test-model", usage)
-
-    assert cost.microusd == 500
+    assert thinking.microusd == 250
+    assert thinking.microusd == without_breakdown.microusd, "the breakdown must not change the bill"
 
 
 def test_costs_aggregate_across_attempts() -> None:

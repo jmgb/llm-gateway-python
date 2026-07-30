@@ -24,6 +24,7 @@ class TokenUsage:
     input_tokens: int | None = None
     output_tokens: int | None = None
     reasoning_tokens: int | None = None
+    """A breakdown of ``output_tokens``, never an addition to it."""
     retrieved_document_tokens: int | None = None
     cached_input_tokens: int | None = None
     partial_aggregate: bool = False
@@ -50,10 +51,21 @@ class TokenUsage:
 
     @property
     def billable_output_tokens(self) -> int | None:
-        """Output plus reasoning, which is billed at the output rate."""
+        """The output count, which already contains the reasoning tokens.
+
+        Providers disagree about where thinking is counted, so adapters
+        normalise it at the boundary: whatever is billed at the output rate is
+        inside ``output_tokens`` by the time it reaches this class. Adding
+        ``reasoning_tokens`` here would bill them a second time.
+        """
+        return self.output_tokens
+
+    @property
+    def visible_output_tokens(self) -> int | None:
+        """The part of the output the caller actually received back."""
         if self.output_tokens is None:
             return None
-        return self.output_tokens + (self.reasoning_tokens or 0)
+        return self.output_tokens - (self.reasoning_tokens or 0)
 
     def merge(self, other: TokenUsage) -> TokenUsage:
         """Aggregate two attempts. An unknown operand taints the total."""

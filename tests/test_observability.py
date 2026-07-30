@@ -59,7 +59,7 @@ class StubAdapter:
 
 def _ok() -> ProviderResponse:
     return ProviderResponse(
-        output_text=f"respuesta sobre {SECRET_PROMPT}",
+        output_text=f"an answer about {SECRET_PROMPT}",
         usage=TokenUsage(input_tokens=10, output_tokens=5),
         finish_reason="stop",
     )

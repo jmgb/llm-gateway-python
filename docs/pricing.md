@@ -45,6 +45,26 @@ can least afford it.
 Similarly, a provider that reports no usage produces `TokenUsage.unknown()`,
 whose fields are `None` — not zeroes.
 
+## Reasoning tokens
+
+`output_tokens` always means **everything billed at the output rate**,
+reasoning included. `reasoning_tokens` is a breakdown of that number, never an
+addition to it, and `visible_output_tokens` is the remainder the caller
+actually received.
+
+Providers disagree here, so each adapter normalises at its boundary:
+
+| Provider | Reported as | Adapter |
+|---|---|---|
+| OpenAI (Responses) | `output_tokens_details.reasoning_tokens`, already inside `output_tokens` | passed through |
+| OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through |
+| Gemini | `thoughts_token_count`, **outside** `candidates_token_count` | folded into `output_tokens` |
+
+Adding the breakdown back on top of the total is a real bug this package had:
+at a thinking effort where reasoning dominates the visible answer, it
+overstated cost by roughly 1.5–2×. If you implement your own `PriceCatalog`,
+price `usage.billable_output_tokens` and do not add `reasoning_tokens` yourself.
+
 ## Retries and fallbacks are billed
 
 `result.cost` aggregates **every attempt that reached the provider**, including

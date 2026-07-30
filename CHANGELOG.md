@@ -7,6 +7,75 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [0.5.0] — 2026-07-30
+
+### Added
+
+- **OpenRouter is a provider, not a `base_url`.** `OpenRouterAdapter`,
+  `create_openrouter_client`, an `[openrouter]` extra and an
+  `openrouter_client` argument to `build_registry`.
+
+  It was previously described as the OpenAI adapter pointed elsewhere, which
+  was wrong in three ways. OpenRouter's stable surface is Chat Completions, not
+  the Responses API. It is an aggregator, so it cannot promise the OpenAI
+  adapter's capabilities: it declares the floor every route honours
+  (`structured_outputs=False`, `json_mode=True`) and the gateway validates the
+  payload afterwards, as it already did for Groq. And the model that answers is
+  not always the model requested — `openrouter/auto` chooses one — so the
+  reply's own model id is reported as `model_used`.
+
+  The adapter maps `prompt_tokens_details.cached_tokens` and
+  `completion_tokens_details.reasoning_tokens`, so cached input and reasoning
+  are accounted for on this route too.
+
+### Fixed
+
+- **The catalogue's OpenRouter models are reachable.** Sixteen models declared
+  `provider="openrouter"`, but no adapter could register under that name, so
+  `registry.resolve("deepseek/deepseek-chat-v3.1")` raised `UnknownModelError`
+  unless the caller passed `build_registry(extra_openai_prefixes=...)` — an
+  argument documented nowhere. Registering `openrouter_client` is now enough,
+  and the namespace rule means uncatalogued `vendor/model` ids route too.
+
+- **Two OpenAI-shaped clients no longer collide.** Registering one for OpenAI
+  and one for OpenRouter left a single entry under the name `openai`, because
+  both adapters reported that name. The second silently won: `gpt-5.6-luna`
+  resolved to the OpenRouter client, sending OpenAI traffic through an
+  aggregator with no error and no log line. The names are now distinct.
+
+  `extra_openai_prefixes` remains, for what it is actually good at: widening
+  the OpenAI adapter to an Azure deployment name or a self-hosted id.
+
+## [0.4.2] — 2026-07-30
+
+### Fixed
+
+- **Reasoning tokens are no longer billed twice.** `billable_output_tokens`
+  added `reasoning_tokens` on top of `output_tokens`, but the Responses API
+  already counts reasoning inside `output_tokens` — input plus output
+  reconciles to the reported total. With a thinking effort where reasoning
+  dominates the visible answer, the estimate came out roughly 1.5–2× the real
+  amount, which is exactly the kind of figure that stops reconciling against a
+  provider invoice.
+
+  `output_tokens` now means the same thing in every adapter — everything
+  billed at the output rate — and `reasoning_tokens` is a breakdown of it,
+  never an addition to it. Normalisation happens at the boundary, so the
+  Gemini adapter folds `thoughts_token_count` into `output_tokens`, since
+  `candidates_token_count` genuinely excludes it. `visible_output_tokens`
+  reports the part the caller actually received.
+
+  Cost figures produced by earlier versions for reasoning models are
+  overstated and cannot be corrected in place: recompute them from the stored
+  token counts.
+
+- **The OpenAI adapter sends the system prompt as a message.** It travelled as
+  `instructions`, which is not part of the input — and `json_object` mode is
+  rejected unless the word "json" appears in the input. A system prompt asking
+  for JSON was invisible to that check, so a call whose user content did not
+  happen to say "json" failed. The prompt is now the first input message, which
+  is also the arrangement Chat Completions used.
+
 ## [0.4.1] — 2026-07-30
 
 ### Fixed

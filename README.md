@@ -70,8 +70,9 @@ uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-py
 pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.4.1"
 ```
 
-Available extras: `openai`, `gemini`, `groq`, `all`. Combine them as
-`[openai,gemini]`.
+Available extras: `openai`, `gemini`, `groq`, `openrouter`, `all`. Combine them
+as `[openai,gemini]`. `openrouter` installs the `openai` SDK, so `[all]` already
+covers it.
 
 Importing the package with no extra installed works by design; asking for a
 provider you have not installed raises a typed error naming the exact extra.
@@ -177,12 +178,46 @@ that application's local adapter.
 
 | Provider | Extra | Notes |
 |---|---|---|
-| OpenAI | `[openai]` | Responses API. Also serves **OpenRouter** via `base_url` |
+| OpenAI | `[openai]` | Responses API |
 | Google Gemini | `[gemini]` | `google-genai` async surface, not the retired `google-generativeai` |
 | Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the gateway validates after |
+| OpenRouter | `[openrouter]` | Chat Completions. Aggregator: declares the floor every route honours, not the best case |
 
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
+
+`[openrouter]` installs the `openai` SDK, because OpenRouter speaks the OpenAI
+wire format and ships none of its own. That is a fact about the transport: the
+adapter, the declared capabilities and the prices are OpenRouter's.
+
+### Routing to OpenRouter
+
+Models reach it by their namespace, so nothing needs configuring:
+
+```python
+from llm_gateway.factories import (
+    build_registry,
+    create_openai_client,
+    create_openrouter_client,
+)
+
+registry = build_registry(
+    openai_client=create_openai_client(api_key=...),
+    openrouter_client=create_openrouter_client(api_key=...),
+)
+
+registry.resolve("gpt-5.6-luna")  # openai
+registry.resolve("deepseek/deepseek-chat-v3.1")  # openrouter, from the catalogue
+registry.resolve("somevendor/brand-new")  # openrouter, by the namespace rule
+registry.resolve("openai/gpt-oss-120b")  # groq — the prefix is not OpenAI
+```
+
+`gemini-3-pro-preview` and `google/gemini-3-pro-preview` are the same model on
+two routes, catalogued separately because they are billed separately.
+
+For any *other* OpenAI-compatible endpoint — Azure, vLLM, your own gateway —
+pass `base_url` to `create_openai_client` and widen the routing with
+`build_registry(extra_openai_prefixes=...)`.
 
 ## Model catalogue and prices
 

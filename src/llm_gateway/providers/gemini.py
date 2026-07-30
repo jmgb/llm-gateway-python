@@ -87,10 +87,17 @@ def _role(role: str) -> str:
 def _usage(raw: Any) -> TokenUsage:
     if raw is None:
         return TokenUsage.unknown()
+    # Gemini reports thoughts *outside* candidates_token_count, unlike the
+    # providers whose output count already contains them. They are billed at
+    # the output rate, so folding them in here is what keeps output_tokens
+    # meaning the same thing in every adapter. Without a candidate count there
+    # is no full output to complete, so thoughts alone stay unknown.
+    candidates = getattr(raw, "candidates_token_count", None)
+    thoughts = getattr(raw, "thoughts_token_count", None)
     return TokenUsage(
         input_tokens=getattr(raw, "prompt_token_count", None),
-        output_tokens=getattr(raw, "candidates_token_count", None),
-        reasoning_tokens=getattr(raw, "thoughts_token_count", None),
+        output_tokens=None if candidates is None else candidates + (thoughts or 0),
+        reasoning_tokens=thoughts,
         cached_input_tokens=getattr(raw, "cached_content_token_count", None),
     )
 

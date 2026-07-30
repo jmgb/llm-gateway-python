@@ -18,11 +18,18 @@ from llm_gateway.errors import ProviderNotInstalled
 from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
+from llm_gateway.providers.openrouter import OpenRouterAdapter
 from llm_gateway.registry import ProviderRegistry
 
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 GEMINI_MODEL_PREFIXES = ("gemini", "models/gemini")
 GROQ_MODEL_PREFIXES = ("llama", "mixtral", "gemma", "qwen", "kimi", "groq/")
+OPENROUTER_MODEL_PREFIXES = ("openrouter/",)
+"""Deliberately short. OpenRouter's catalogued models route by their declared
+provider, and any other ``vendor/model`` id reaches it through the namespace
+rule in :mod:`llm_gateway.models` — so only OpenRouter's own ids need listing."""
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def _require_key(api_key: str) -> None:
@@ -31,7 +38,12 @@ def _require_key(api_key: str) -> None:
 
 
 def create_openai_client(*, api_key: str, base_url: str | None = None) -> Any:
-    """Build an ``AsyncOpenAI``. Also serves OpenRouter, via ``base_url``."""
+    """Build an ``AsyncOpenAI``.
+
+    ``base_url`` points the same SDK at any OpenAI-compatible endpoint — Azure,
+    vLLM, a self-hosted gateway. For OpenRouter use
+    :func:`create_openrouter_client`, which is a provider in its own right.
+    """
     _require_key(api_key)
     try:
         from openai import AsyncOpenAI
@@ -40,6 +52,22 @@ def create_openai_client(*, api_key: str, base_url: str | None = None) -> Any:
     if base_url:
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
     return AsyncOpenAI(api_key=api_key)
+
+
+def create_openrouter_client(*, api_key: str, base_url: str = OPENROUTER_BASE_URL) -> Any:
+    """Build an ``AsyncOpenAI`` pointed at OpenRouter.
+
+    OpenRouter ships no SDK of its own: it speaks the OpenAI wire format, so
+    the ``openai`` extra is what this needs installed. That is a fact about the
+    transport, not about the provider — the adapter, the capabilities and the
+    prices are OpenRouter's own.
+    """
+    _require_key(api_key)
+    try:
+        from openai import AsyncOpenAI
+    except ImportError as error:
+        raise ProviderNotInstalled.for_provider("openrouter") from error
+    return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
 
 def create_gemini_client(*, api_key: str) -> Any:
@@ -67,9 +95,15 @@ def build_registry(
     openai_client: Any | None = None,
     gemini_client: Any | None = None,
     groq_client: Any | None = None,
+    openrouter_client: Any | None = None,
     extra_openai_prefixes: tuple[str, ...] = (),
 ) -> ProviderRegistry:
-    """Register the adapters for the clients the application supplies."""
+    """Register the adapters for the clients the application supplies.
+
+    ``extra_openai_prefixes`` widens the OpenAI adapter to model ids it does
+    not know — an Azure deployment name, a self-hosted id. OpenRouter does not
+    need it: pass ``openrouter_client`` and its models route by themselves.
+    """
     registry = ProviderRegistry()
     if openai_client is not None:
         registry.register(
@@ -80,6 +114,10 @@ def build_registry(
         registry.register(GeminiAdapter(gemini_client), model_prefixes=GEMINI_MODEL_PREFIXES)
     if groq_client is not None:
         registry.register(GroqAdapter(groq_client), model_prefixes=GROQ_MODEL_PREFIXES)
+    if openrouter_client is not None:
+        registry.register(
+            OpenRouterAdapter(openrouter_client), model_prefixes=OPENROUTER_MODEL_PREFIXES
+        )
 
     if not registry.provider_names:
         raise ValueError("build_registry needs at least one client")

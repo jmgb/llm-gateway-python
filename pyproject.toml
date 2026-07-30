@@ -1,12 +1,22 @@
 [project]
 name = "neutral-llm-gateway"
-version = "0.4.1"
+version = "0.5.0"
 description = "Neutral LLM gateway: typed contracts, provider adapters and explicit retry, fallback, usage and cost accounting."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "Miguel" }]
-keywords = ["llm", "gateway", "openai", "gemini", "groq", "cost-accounting", "retry", "fallback"]
+keywords = [
+    "llm",
+    "gateway",
+    "openai",
+    "gemini",
+    "groq",
+    "openrouter",
+    "cost-accounting",
+    "retry",
+    "fallback",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -27,6 +37,9 @@ dependencies = [
 openai = ["openai>=2.41,<3"]
 gemini = ["google-genai>=2.11,<3"]
 groq = ["groq>=1.4,<2"]
+# OpenRouter ships no SDK: it speaks the OpenAI wire format. The extra exists
+# so that installing it is named after the provider a consumer actually wants.
+openrouter = ["openai>=2.41,<3"]
 all = [
     "openai>=2.41,<3",
     "google-genai>=2.11,<3",
