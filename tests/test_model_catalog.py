@@ -140,9 +140,9 @@ class TestCatalogueHygiene:
     def test_no_model_id_is_declared_twice(self) -> None:
         """A duplicate key silently discards one of the two prices.
 
-        Observed in the wild: two constants pointing at the same model id, one
-        of the declared prices never applying, and nobody noticing because a
-        dict just keeps the last one.
+        A real case: two constants pointing at the same model id, one of the
+        declared prices never applying, and nobody noticing because a dict just
+        keeps the last one.
         """
         from llm_gateway.models import _ENTRIES
 

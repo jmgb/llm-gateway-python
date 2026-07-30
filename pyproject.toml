@@ -1,6 +1,6 @@
 [project]
-name = "internal-llm-gateway"
-version = "0.2.0"
+name = "neutral-llm-gateway"
+version = "0.3.0"
 description = "Neutral LLM gateway: typed contracts, provider adapters and explicit retry, fallback, usage and cost accounting."
 readme = "README.md"
 license = { file = "LICENSE" }

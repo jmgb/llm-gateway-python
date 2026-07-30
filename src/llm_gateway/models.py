@@ -1,9 +1,9 @@
 """The shared model catalogue: identity, provider and price.
 
-This is the single place where a price is updated. Eight consumers reading one
-versioned table beats eight tables drifting apart, and a model's price is a
-fact about the *provider*, not about any product — which is exactly the test
-for what belongs in this package.
+This is the single place where a price is updated. One versioned table beats
+several copies drifting apart, and a model's price is a fact about the
+*provider*, not about any product — which is exactly the test for what belongs
+in this package.
 
 What stays out: **which model a feature should use**. That is a product
 decision, and putting it here would make one repository's choice everybody's.

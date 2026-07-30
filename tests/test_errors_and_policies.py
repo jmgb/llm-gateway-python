@@ -40,7 +40,7 @@ class TestErrorTaxonomy:
     def test_missing_extra_names_the_install_target(self) -> None:
         error = ProviderNotInstalled.for_provider("groq")
 
-        assert "internal-llm-gateway[groq]" in str(error)
+        assert "neutral-llm-gateway[groq]" in str(error)
 
 
 class TestRetryPolicy:

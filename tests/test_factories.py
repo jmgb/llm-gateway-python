@@ -21,7 +21,7 @@ class FakeAdapter:
 
 
 def test_a_missing_extra_names_the_install_command() -> None:
-    with pytest.raises(ProviderNotInstalled, match=r"internal-llm-gateway\[openai\]"):
+    with pytest.raises(ProviderNotInstalled, match=r"neutral-llm-gateway\[openai\]"):
         create_openai_client(api_key="unused")
 
 

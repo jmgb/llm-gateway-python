@@ -1,7 +1,7 @@
 """Architectural guarantees. These are the promises consumers rely on.
 
 If one of these breaks, the package has stopped being safe to depend on from
-seven repositories at once.
+several applications at once.
 """
 
 from __future__ import annotations

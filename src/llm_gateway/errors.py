@@ -36,7 +36,7 @@ class ProviderNotInstalled(ConfigurationError):
     def for_provider(cls, provider: str) -> ProviderNotInstalled:
         return cls(
             f"provider {provider!r} is not installed; "
-            f"install it with: pip install 'internal-llm-gateway[{provider}]'"
+            f"install it with: pip install 'neutral-llm-gateway[{provider}]'"
         )
 
 

@@ -2,9 +2,10 @@
 
 ## The cut
 
-The package exists because seven applications had grown seven versions of the
-same function — the largest of them 1,947 lines, mixing provider calls, retry
-policy, cost maths, a usage ledger and business alerting in one place.
+The package exists because several applications had each grown their own
+version of the same function — the largest of them close to two thousand lines,
+mixing provider calls, retry policy, cost maths, a usage ledger and business
+alerting in one place.
 
 The split is **not** a common denominator of those seven signatures. A union of
 every parameter would produce a bigger monster; an intersection would produce

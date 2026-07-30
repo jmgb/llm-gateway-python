@@ -1,26 +1,62 @@
-# internal-llm-gateway
+# neutral-llm-gateway
 
-A neutral gateway for LLM calls: typed contracts, thin provider adapters, and
-explicit accounting of retries, fallbacks, tokens and cost.
+A small, honest gateway for LLM calls: typed contracts, thin provider adapters,
+and accounting of retries, fallbacks, tokens and cost that refuses to lie to
+you.
 
 It knows about **providers**, never about products. It holds no credentials,
 reads no environment variables, ships no prompts and stores no business
 schemas. Everything product-shaped — ledgers, tenants, alerting, history,
-prompts — stays in the application, wired in through optional ports.
+prompts — stays in your application, wired in through optional ports.
 
 ```
-application → local facade/adapter → llm_gateway → provider SDK
+your application → your facade → llm_gateway → provider SDK
 ```
 
-Never the reverse, and never application A → application B.
+Never the reverse.
+
+## Why this exists
+
+It was extracted from several applications that had each grown their own
+version of the same "call an LLM" function — the largest close to two thousand
+lines, mixing provider calls, retry policy, cost maths, a usage ledger and
+business alerting in one place. Writing that from scratch a fourth time is how
+subtle accounting bugs get copied around.
+
+The bugs it is built to prevent are all the same shape: **a number that looks
+like a fact but isn't.**
+
+- A provider returns no usage, the code records `0` tokens, and the call bills
+  as free.
+- A model is missing from the price table, so its cost is `USD 0.00` —
+  indistinguishable from a genuinely free call.
+- A retry fails *after* the model produced tokens, and only the successful
+  attempt gets counted.
+- A fallback quietly answers with a different model, and the metrics attribute
+  it to the one you asked for.
+
+Here, unreported usage is `None`, unknown cost is `UNAVAILABLE`, every billable
+attempt is counted, and a fallback is never silent.
+
+### Is this for you?
+
+**Probably yes** if you want a thin, auditable layer you can read in an
+afternoon, you want to own your credentials, you care about per-call cost being
+reconcilable against an invoice, and you prefer typed results to dictionaries.
+
+**Probably not** if you want routing across dozens of providers, a proxy
+server, streaming, or an agent framework.
+[LiteLLM](https://github.com/BerriAI/litellm) and friends cover far more
+surface than this does. This covers deliberately less, and is explicit about
+what it does not know.
 
 ## Install
 
 Provider SDKs are **optional extras**. Install only what you call:
 
 ```bash
-pip install "internal-llm-gateway[gemini]"
-pip install "internal-llm-gateway[openai,gemini,groq]"
+pip install "neutral-llm-gateway[gemini]"
+pip install "neutral-llm-gateway[openai,gemini,groq]"
 ```
 
 Importing the package with no extra installed works by design; asking for a
@@ -30,8 +66,6 @@ command.
 ## Use
 
 ```python
-from decimal import Decimal
-
 from pydantic import BaseModel
 
 from llm_gateway import (
@@ -39,10 +73,8 @@ from llm_gateway import (
     LLMGateway,
     LLMRequest,
     Message,
-    ModelRate,
     ResponseFormat,
     RetryPolicy,
-    StaticPriceCatalog,
 )
 from llm_gateway.factories import build_registry, create_gemini_client
 
@@ -51,12 +83,10 @@ class Answer(BaseModel):
     verdict: str
 
 
+# You build the client, so you keep the key. Prices come from the built-in
+# versioned catalogue unless you pass your own.
 gateway = LLMGateway(
     registry=build_registry(gemini_client=create_gemini_client(api_key=my_key)),
-    price_catalog=StaticPriceCatalog(
-        version="2026-07-30",
-        rates={"gemini-3.5-flash-lite": ModelRate(Decimal("0.3"), Decimal("2.5"))},
-    ),
 )
 
 result = await gateway.generate(
@@ -98,7 +128,7 @@ These are enforced by tests, not by convention:
 | Output, usage, execution and cost are separate | A token count can never be mistaken for a business field |
 | Sinks never receive prompts or responses | Observability without storing content |
 | No module reads the environment | The application owns its credentials |
-| Importing needs no provider extra | Eight consumers, eight dependency sets |
+| Importing needs no provider extra | Each application installs only the SDKs it calls |
 
 ## Extending
 
@@ -121,11 +151,26 @@ that application's local adapter.
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
 
+## Model catalogue and prices
+
+The package ships a versioned table of models — provider, and price in USD per
+million tokens — used by default, so a call is priced without you wiring
+anything up. Override it for negotiated rates, or implement `PriceCatalog`
+yourself. See [`docs/pricing.md`](docs/pricing.md).
+
 ## Not in this version
 
-Tools/function calling, file attachments and Gemini File Search are
-deliberately absent from `0.1.0`. Each is a real capability with its own cost
-and failure model, and none is needed by the first consumers. See `CHANGELOG.md`.
+Tools/function calling, file attachments, streaming and Gemini File Search are
+deliberately absent. Each is a real capability with its own cost and failure
+model, and adding one badly is worse than not having it. See `CHANGELOG.md` for
+the reasoning on each.
+
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — how the split was decided
+- [`docs/pricing.md`](docs/pricing.md) — cost model and updating prices
+- [`docs/migration.md`](docs/migration.md) — adopting it behind an existing function
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — what belongs here, and the non-negotiables
 
 ## Development
 
@@ -137,4 +182,14 @@ uv run mypy
 uv build
 ```
 
-Python 3.11+ (the floor is set by the oldest consumer), Pydantic v2.
+Python 3.11+, Pydantic v2.
+
+## Status
+
+`0.x`: in production use, but the API may still change between minor versions.
+Pin an exact version. Every release documents its changes, and cost-affecting
+changes are called out explicitly.
+
+## License
+
+MIT.

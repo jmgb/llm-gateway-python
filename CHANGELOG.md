@@ -7,6 +7,23 @@ All notable changes to this package are documented here. The format follows
 While the version is `0.x` the public API may still break between minors. Each
 consumer pins an immutable tag and upgrades through its own pull request.
 
+## [0.3.0] — 2026-07-30
+
+Prepared for public release.
+
+### Changed
+
+- **Renamed the distribution** to `neutral-llm-gateway`. The import stays
+  `llm_gateway`. Update your dependency name; nothing else changes.
+
+### Added
+
+- `CONTRIBUTING.md` (what belongs here, the two-consumer rule, the
+  non-negotiables), `SECURITY.md` (private reporting, and the properties a
+  report can be measured against) and `docs/pricing.md`.
+- A README that explains what this is for, and when you should use something
+  else instead.
+
 ## [0.2.0] — 2026-07-30
 
 The shared model catalogue. Prices now live here, so they are updated once
@@ -15,7 +32,7 @@ instead of once per consumer.
 ### Added
 
 - `llm_gateway.models`: **46 models** with provider and price, merged from the
-  two existing catalogues in the fleet. `CATALOG_VERSION` identifies the table,
+  two catalogues this package was extracted from. `CATALOG_VERSION` identifies it,
   and every recorded amount carries it.
 - `builtin_price_catalog()` — used by `LLMGateway` **by default**, so a consumer
   that says nothing about prices gets real, versioned ones instead of
@@ -30,7 +47,7 @@ instead of once per consumer.
   cheapest-first chain from the catalogue, skipping deprecated models. Whether
   degrading is acceptable remains the caller's decision.
 - Test forbidding duplicate model ids. A duplicate key silently discards one of
-  the two declared prices, which is a real defect observed in the fleet.
+  the two declared prices, which is a defect this extraction actually found.
 
 ### Notes
 
@@ -84,6 +101,6 @@ consumer can be integrated behind a facade and compared for parity.
 
 ### Notes
 
-- `requires-python = ">=3.11"`, set by the oldest consumer in the fleet.
+- `requires-python = ">=3.11"`, chosen to support still-common runtimes.
 - `pydantic>=2.10,<3`; every target consumer is already on Pydantic v2.
 - The test suite makes no network calls and costs nothing to run.

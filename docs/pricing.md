@@ -1,0 +1,108 @@
+# Pricing
+
+## The problem this solves
+
+Every application that calls an LLM ends up with a table of token prices. Keep
+several of those tables and they drift: one gets updated when a provider
+changes a rate, the others quietly keep billing yesterday's number. The figures
+then stop reconciling against the invoice, and nobody notices until someone
+asks why the dashboard disagrees with the bill.
+
+So the table lives here, once, in `src/llm_gateway/models.py`.
+
+A model's price is a fact about the **provider**, not about your product —
+which is exactly the test for what belongs in this package.
+
+## Units
+
+Prices are declared in **USD per million tokens**, the way providers publish
+them. Rates are consumed as **microUSD per token**. Those are the same number:
+
+```
+1 USD / 1,000,000 tokens  =  1e-6 USD / token  =  1 microUSD / token
+```
+
+The conversion is the identity, so there is no factor to get wrong. A test
+asserts it.
+
+Arithmetic is done in **whole microdollars** with `ROUND_HALF_UP`, so totals
+add up exactly and there is no floating-point drift across many small calls.
+
+## The three measurements
+
+`Cost.measurement` is as important as the amount:
+
+| Value | Meaning |
+|---|---|
+| `ACTUAL` | Every billable dimension was reported by the provider and priced |
+| `ESTIMATED` | A **lower bound**: something billable was missing or unpriced |
+| `UNAVAILABLE` | No amount could be computed. **Not** the same as free |
+
+An unknown cost is never rendered as `USD 0`. "Free" and "unknown" are
+different facts, and conflating them under-declares spend precisely when you
+can least afford it.
+
+Similarly, a provider that reports no usage produces `TokenUsage.unknown()`,
+whose fields are `None` — not zeroes.
+
+## Retries and fallbacks are billed
+
+`result.cost` aggregates **every attempt that reached the provider**, including
+the ones that failed. A call that timed out after the model had already
+produced tokens is not free.
+
+When a failed attempt's cost is unknown, the total degrades to `ESTIMATED`
+rather than silently ignoring it.
+
+## Versioning
+
+`CATALOG_VERSION` identifies the table that produced an amount, and travels
+with every `Cost` and every `UsageRecord`. Store it alongside your figures:
+it is what lets you recompute or audit an old number after prices have moved.
+
+Consumers pin a package tag, so nobody's cost figures change without an
+explicit upgrade.
+
+## Updating a price
+
+1. Edit the entry in `src/llm_gateway/models.py`.
+2. Bump `CATALOG_VERSION`.
+3. Note it in `CHANGELOG.md`.
+4. Tag a release.
+
+Never delete a model that consumers might still call — mark it
+`deprecated=True`. Deleting it turns a priced call into an `UNAVAILABLE` one,
+which is a silent loss of cost data.
+
+Duplicate ids are rejected by a test: a repeated key silently discards one of
+the two declared prices, and that failure is invisible until someone audits an
+invoice.
+
+## Using your own prices
+
+Negotiated rates, or a model the catalogue does not know yet:
+
+```python
+from decimal import Decimal
+from llm_gateway.models import builtin_price_catalog
+
+catalog = builtin_price_catalog(
+    overrides={"gemini-3.5-flash-lite": (Decimal("0.20"), Decimal("1.80"))},
+    version="my-negotiated-rates-2026-07",  # required
+)
+```
+
+The version is mandatory when overriding. Without it an amount would be
+attributed to a catalogue version that did not produce it, which defeats the
+whole point of recording the version.
+
+For something more dynamic — prices from a database, per-customer rates —
+implement the `PriceCatalog` protocol yourself and pass it to `LLMGateway`. It
+needs a `version` property and an `estimate(model, usage)` method.
+
+## What is not here
+
+**Audio and speech-to-text pricing**, which is billed per hour with
+provider-specific minimum billable durations. It is a different cost model, and
+no capability in this package produces it. It will be added when a real
+consumer of it exists here.
