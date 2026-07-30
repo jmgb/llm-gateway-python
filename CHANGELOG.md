@@ -30,26 +30,6 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Fixed
 
-- **The catalogue's OpenRouter models are reachable.** Sixteen models declared
-  `provider="openrouter"`, but no adapter could register under that name, so
-  `registry.resolve("deepseek/deepseek-chat-v3.1")` raised `UnknownModelError`
-  unless the caller passed `build_registry(extra_openai_prefixes=...)` — an
-  argument documented nowhere. Registering `openrouter_client` is now enough,
-  and the namespace rule means uncatalogued `vendor/model` ids route too.
-
-- **Two OpenAI-shaped clients no longer collide.** Registering one for OpenAI
-  and one for OpenRouter left a single entry under the name `openai`, because
-  both adapters reported that name. The second silently won: `gpt-5.6-luna`
-  resolved to the OpenRouter client, sending OpenAI traffic through an
-  aggregator with no error and no log line. The names are now distinct.
-
-  `extra_openai_prefixes` remains, for what it is actually good at: widening
-  the OpenAI adapter to an Azure deployment name or a self-hosted id.
-
-## [0.4.2] — 2026-07-30
-
-### Fixed
-
 - **Reasoning tokens are no longer billed twice.** `billable_output_tokens`
   added `reasoning_tokens` on top of `output_tokens`, but the Responses API
   already counts reasoning inside `output_tokens` — input plus output
@@ -69,12 +49,40 @@ consumer pins an immutable tag and upgrades through its own pull request.
   overstated and cannot be corrected in place: recompute them from the stored
   token counts.
 
+  A contract test now holds every adapter to this: each one is handed its own
+  provider's native shape for the same call and must arrive at the same three
+  numbers. A new adapter fails it until it declares where its provider counts
+  thinking.
+
+- **The Groq adapter reports the reasoning breakdown.** It read only
+  `prompt_tokens` and `completion_tokens`, so a thinking model looked like it
+  had returned every token it was billed for. No amount changes — Chat
+  Completions already counts reasoning inside `completion_tokens` — but
+  `visible_output_tokens` was wrong, which is the number you compare against
+  what the model actually said.
+
 - **The OpenAI adapter sends the system prompt as a message.** It travelled as
   `instructions`, which is not part of the input — and `json_object` mode is
   rejected unless the word "json" appears in the input. A system prompt asking
   for JSON was invisible to that check, so a call whose user content did not
   happen to say "json" failed. The prompt is now the first input message, which
   is also the arrangement Chat Completions used.
+
+- **The catalogue's OpenRouter models are reachable.** Sixteen models declared
+  `provider="openrouter"`, but no adapter could register under that name, so
+  `registry.resolve("deepseek/deepseek-chat-v3.1")` raised `UnknownModelError`
+  unless the caller passed `build_registry(extra_openai_prefixes=...)` — an
+  argument documented nowhere. Registering `openrouter_client` is now enough,
+  and the namespace rule means uncatalogued `vendor/model` ids route too.
+
+- **Two OpenAI-shaped clients no longer collide.** Registering one for OpenAI
+  and one for OpenRouter left a single entry under the name `openai`, because
+  both adapters reported that name. The second silently won: `gpt-5.6-luna`
+  resolved to the OpenRouter client, sending OpenAI traffic through an
+  aggregator with no error and no log line. The names are now distinct.
+
+  `extra_openai_prefixes` remains, for what it is actually good at: widening
+  the OpenAI adapter to an Azure deployment name or a self-hosted id.
 
 ## [0.4.1] — 2026-07-30
 

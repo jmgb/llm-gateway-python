@@ -64,10 +64,10 @@ Not on PyPI yet — install from the repository, pinning a tag:
 
 ```bash
 # uv
-uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.4.1"
+uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.5.0"
 
 # pip
-pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.4.1"
+pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.5.0"
 ```
 
 Available extras: `openai`, `gemini`, `groq`, `openrouter`, `all`. Combine them
@@ -87,7 +87,7 @@ provider you have not installed raises a typed error naming the exact extra.
 dependencies = ["neutral-llm-gateway[gemini]"]
 
 [tool.uv.sources]
-neutral-llm-gateway = { git = "https://github.com/jmgb/llm-gateway-python.git", rev = "v0.4.1" }
+neutral-llm-gateway = { git = "https://github.com/jmgb/llm-gateway-python.git", rev = "v0.5.0" }
 ```
 
 To upgrade, run `uv add` again with the new tag. `uv sync --locked` works in CI
