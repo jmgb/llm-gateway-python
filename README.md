@@ -1,6 +1,7 @@
 # neutral-llm-gateway
 
 [![CI](https://github.com/jmgb/llm-gateway-python/actions/workflows/ci.yml/badge.svg)](https://github.com/jmgb/llm-gateway-python/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/neutral-llm-gateway)](https://pypi.org/project/neutral-llm-gateway/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
 [![mypy: strict](https://img.shields.io/badge/mypy-strict-blue)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -60,14 +61,12 @@ what it does not know.
 
 Provider SDKs are **optional extras**. Install only what you call.
 
-Not on PyPI yet — install from the repository, pinning a tag:
-
 ```bash
 # uv
-uv add "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.5.0"
+uv add "neutral-llm-gateway[gemini]"
 
 # pip
-pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.5.0"
+pip install "neutral-llm-gateway[gemini]"
 ```
 
 Available extras: `openai`, `gemini`, `groq`, `openrouter`, `all`. Combine them
@@ -77,25 +76,12 @@ covers it.
 Importing the package with no extra installed works by design; asking for a
 provider you have not installed raises a typed error naming the exact extra.
 
-### With uv
+To try an unreleased commit, the PEP 508 git form works everywhere and pins a
+tag or revision:
 
-`uv add` records the dependency and pins the tag to an exact commit in
-`uv.lock`, so builds stay reproducible even if the tag is ever moved:
-
-```toml
-[project]
-dependencies = ["neutral-llm-gateway[gemini]"]
-
-[tool.uv.sources]
-neutral-llm-gateway = { git = "https://github.com/jmgb/llm-gateway-python.git", rev = "v0.5.0" }
+```bash
+pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.5.0"
 ```
-
-To upgrade, run `uv add` again with the new tag. `uv sync --locked` works in CI
-with **no credentials**, since the repository is public.
-
-If a consuming project does not use uv, the portable PEP 508 form works
-everywhere — put the whole URL directly in `dependencies` instead of using
-`[tool.uv.sources]`.
 
 ## Use
 
