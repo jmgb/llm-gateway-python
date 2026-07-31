@@ -44,5 +44,12 @@ jobs:
       - name: Tests
         run: uv run pytest
 
-      - name: Build wheel
+      - name: Build sdist and wheel
         run: uv build
+
+      # The same audit both publishers run, moved to every pull request. A
+      # packaging regression is otherwise invisible until release day, which is
+      # exactly when nobody wants to discover it: 0.6.0's sdist carried a local
+      # .env and built, uploaded and installed perfectly well.
+      - name: Audit what would be published
+        run: python3 scripts/audit_dist.py

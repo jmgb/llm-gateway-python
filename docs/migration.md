@@ -91,6 +91,49 @@ Each consumer pins an immutable tag, so rolling back is a lock change. During
 release: pinning protects you from a bad upgrade, not from a design you have
 not exercised in production yet.
 
+## Upgrading from 0.6 to 0.7
+
+Two changes need a look before the pin moves.
+
+### Unusable output no longer raises its own error
+
+A response that could not be parsed, or that violated the schema, used to reach
+the caller as `OutputParsingError` or `SchemaValidationError`. It is now a
+failed billable attempt: the fallback gets a turn, and a call that never
+produces a usable answer raises `AllAttemptsFailed` like any other exhausted
+call, carrying every attempt.
+
+```python
+except SchemaValidationError:      # 0.6 — no longer reached
+except AllAttemptsFailed as error: # 0.7
+    error.__cause__                # the OutputParsingError / SchemaValidationError
+    error.attempts                 # what it cost, including the rejected answer
+```
+
+Catching `OutputError` still works for the attempt-level type through
+`__cause__`, but not as the exception the call raises. A consumer that catches
+`(AllAttemptsFailed, OutputError)` together already keeps working.
+
+Expect the totals to move: the tokens that produced a rejected answer are now
+inside `result.usage` and `result.cost`, where before they were absent. That is
+the correction, not a regression — the provider had already invoiced them.
+
+### A local override of the same behaviour must be deleted, not adapted
+
+Some consumers worked around the 0.6 behaviour by subclassing `LLMGateway` and
+reimplementing `_run`, importing `_interpret`, `_aggregate`,
+`_request_for_model` or `_attempt_model` from `llm_gateway.gateway`.
+
+Those are private, and 0.7 changed all of them: `_attempt_model` now returns a
+completion or the failure that ended the model's turn, never `None`, because
+validation moved inside it. **Delete the override.** Adapting it means running
+the fallback plan twice — once in the subclass and once in the gateway — which
+double-counts nothing but attempts every model twice as often as intended.
+
+If you need behaviour the package does not offer, the supported seams are the
+ports and the policies. An underscore-prefixed symbol is not one, and nothing
+in `0.x` promises it will survive a minor.
+
 ## Notes for specific shapes
 
 - **A second layer over the facade** (e.g. a runner module) must migrate too;
