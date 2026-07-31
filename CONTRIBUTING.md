@@ -83,6 +83,13 @@ without the fix.
 4. Add the SDK as an **optional extra** in `pyproject.toml`.
 5. Tests with a fake client, covering usage mapping and the "usage not
    reported" case.
+6. Export whatever the adapter adds to the public API from
+   `src/llm_gateway/__init__.py`'s `__all__`. A symbol reachable only through
+   its module is not part of the API consumers may rely on.
+7. Add the provider's row to the reasoning-token table in `docs/pricing.md`,
+   stating where it reports thinking and what your adapter does about it. That
+   table is the only place the agreement between adapters is written down; a
+   test fails if a provider is missing from it.
 
 An OpenAI-compatible API is **not** on its own a reason to skip all this. It
 decides the transport, not the provider. Ask instead:
@@ -105,6 +112,12 @@ deployment, vLLM, your own gateway — widened with
 Edit `src/llm_gateway/models.py`, bump `CATALOG_VERSION`, and note it in the
 changelog. Prices are declared in USD per million tokens. Never delete a model
 that consumers may still call — mark it `deprecated=True`.
+
+The version is not optional bookkeeping: it travels with every recorded amount
+and is what allows an old figure to be recomputed. `TestPricesAndVersionMoveTogether`
+in `tests/test_model_catalog.py` pins a fingerprint of the priced table, so a
+rate that moves without a new version fails the suite. Repin both constants in
+the same commit that changes the price.
 
 ## Commit and PR
 

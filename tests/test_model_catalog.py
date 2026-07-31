@@ -4,6 +4,7 @@ This is the answer to "where do I update a price?". One repository, one
 version string, every consumer.
 """
 
+import hashlib
 from decimal import Decimal
 
 import pytest
@@ -208,6 +209,48 @@ class TestCatalogueHygiene:
 
         with pytest.raises((AttributeError, TypeError)):
             info.input_usd_per_mtok = Decimal("0")  # type: ignore[misc]
+
+
+class TestPricesAndVersionMoveTogether:
+    """A price change that keeps the old version makes past amounts unauditable.
+
+    ``CATALOG_VERSION`` is recorded next to every amount so an old figure can be
+    recomputed from the table that produced it. Editing a rate without bumping
+    it points two different tables at the same name, and the invoice that no
+    longer reconciles is discovered months later, by someone else.
+
+    The fingerprint below is the guard. Changing a price fails this test, and
+    the honest fix is to bump the version in ``models.py`` and both constants
+    here in the same commit.
+    """
+
+    PRICED_AT_VERSION = "2026-07-31"
+    PRICE_FINGERPRINT = "90d7b71c6d5ddfddd0a728608d6a16ac0313ff0859615c40365da678b995daf9"
+
+    @staticmethod
+    def _fingerprint() -> str:
+        """Identity and rates only, at a fixed precision.
+
+        Quantising is what keeps ``2`` and ``2.00`` the same price, so the test
+        fires on a rate that moved, never on a literal that was retyped.
+        """
+        micro = Decimal("0.000001")
+        priced = sorted(
+            f"{info.id}\t{info.input_usd_per_mtok.quantize(micro)}"
+            f"\t{info.output_usd_per_mtok.quantize(micro)}"
+            for info in MODEL_CATALOG.values()
+        )
+        return hashlib.sha256("\n".join(priced).encode()).hexdigest()
+
+    def test_no_price_changes_without_a_new_catalog_version(self) -> None:
+        assert self._fingerprint() == self.PRICE_FINGERPRINT, (
+            f"the priced catalogue changed while CATALOG_VERSION stayed "
+            f"{CATALOG_VERSION!r}: bump it, then update this fingerprint"
+        )
+
+    def test_the_pinned_fingerprint_belongs_to_the_current_version(self) -> None:
+        """Bumping the version without repinning would leave the guard checking a ghost."""
+        assert CATALOG_VERSION == self.PRICED_AT_VERSION
 
 
 class TestDeclaredRequestOptions:
