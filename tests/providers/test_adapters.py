@@ -232,6 +232,15 @@ class TestGeminiAdapter:
 
         assert recorder.kwargs["config"]["response_mime_type"] == "application/json"
 
+    async def test_it_maps_gemini_3_reasoning_effort_to_a_thinking_level(self) -> None:
+        recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
+
+        await GeminiAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="medium"), model="gemini-3.6-flash"
+        )
+
+        assert recorder.kwargs["config"]["thinking_config"] == {"thinking_level": "medium"}
+
 
 class TestGroqAdapter:
     def _client(self, recorder: Recorder) -> Any:
@@ -307,6 +316,20 @@ class TestGroqAdapter:
 
         assert response.usage.reasoning_tokens is None
         assert response.usage.visible_output_tokens == 7
+
+    async def test_it_forwards_reasoning_effort_for_gpt_oss(self) -> None:
+        recorder = Recorder(
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="x"), finish_reason=None)],
+                usage=None,
+            )
+        )
+
+        await GroqAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="high"), model="openai/gpt-oss-120b"
+        )
+
+        assert recorder.kwargs["reasoning_effort"] == "high"
 
 
 class TestOpenRouterAdapter:
@@ -412,7 +435,8 @@ class TestOpenRouterAdapter:
 class TestCapabilities:
     def test_each_adapter_declares_what_it_supports(self) -> None:
         assert OpenAIAdapter(SimpleNamespace()).capabilities.structured_outputs is True
-        assert GroqAdapter(SimpleNamespace()).capabilities.reasoning_effort is False
+        assert GeminiAdapter(SimpleNamespace()).capabilities.reasoning_effort is True
+        assert GroqAdapter(SimpleNamespace()).capabilities.reasoning_effort is True
 
     def test_an_aggregator_does_not_promise_what_its_models_may_not_support(self) -> None:
         capabilities = OpenRouterAdapter(SimpleNamespace()).capabilities

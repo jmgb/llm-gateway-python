@@ -19,7 +19,7 @@ from llm_gateway.pricing import Cost
 from llm_gateway.usage import TokenUsage
 
 Role = Literal["system", "user", "assistant"]
-ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 
 @dataclass(frozen=True, slots=True)

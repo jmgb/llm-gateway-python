@@ -106,7 +106,7 @@ class TestCatalogueAwareFallback:
             assert info.provider == "gemini"
 
     def test_the_cheapest_model_has_no_cheaper_alternative(self) -> None:
-        policy = FallbackPolicy.cheaper_than("gemini-2.5-flash-lite")
+        policy = FallbackPolicy.cheaper_than("gemini-3.1-flash-lite-preview")
 
         assert policy.models == ()
 

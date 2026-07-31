@@ -45,6 +45,22 @@ OPENAI_56_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "xhigh",
     "max",
 )
+GEMINI_3_FLASH_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+    "minimal",
+    "low",
+    "medium",
+    "high",
+)
+GEMINI_3_PRO_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+    "low",
+    "medium",
+    "high",
+)
+GROQ_GPT_OSS_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+    "low",
+    "medium",
+    "high",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,37 +137,104 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("gpt-realtime-mini-2025-12-15", "openai", "10.00", "20.00", notes="realtime audio"),
     _m("gpt-realtime-1.5-2026-02-25", "openai", "32.00", "64.00", notes="realtime audio"),
     # ---- Groq (OpenAI-compatible ids, served by Groq) -------------------
-    _m("openai/gpt-oss-120b", "groq", "0.15", "0.60", notes="the openai/ prefix is not OpenAI"),
-    _m("openai/gpt-oss-20b", "groq", "0.075", "0.30", notes="the openai/ prefix is not OpenAI"),
+    _m(
+        "openai/gpt-oss-120b",
+        "groq",
+        "0.15",
+        "0.60",
+        notes="the openai/ prefix is not OpenAI",
+        reasoning_efforts=GROQ_GPT_OSS_REASONING_EFFORTS,
+    ),
+    _m(
+        "openai/gpt-oss-20b",
+        "groq",
+        "0.075",
+        "0.30",
+        notes="the openai/ prefix is not OpenAI",
+        reasoning_efforts=GROQ_GPT_OSS_REASONING_EFFORTS,
+    ),
     _m("meta-llama/llama-4-scout-17b-16e-instruct", "groq", "0.11", "0.34"),
     _m("meta-llama/llama-4-maverick-17b-128e-instruct", "groq", "0.50", "0.77"),
     # ---- Google Gemini --------------------------------------------------
-    _m("gemini-2.5-flash", "gemini", "0.30", "2.50"),
-    _m("gemini-2.5-flash-lite", "gemini", "0.10", "0.40"),
-    _m("gemini-2.5-flash-image", "gemini", "0.30", "2.50"),
-    _m("gemini-3-flash-preview", "gemini", "0.50", "3.00"),
-    _m("gemini-3-pro-preview", "gemini", "2.00", "12.00"),
+    _m(
+        "gemini-3-flash-preview",
+        "gemini",
+        "0.50",
+        "3.00",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-3-pro-preview",
+        "gemini",
+        "2.00",
+        "12.00",
+        reasoning_efforts=GEMINI_3_PRO_REASONING_EFFORTS,
+    ),
     _m("gemini-3-pro-image", "gemini", "2.00", "12.00"),
-    _m("gemini-3.1-flash-lite-preview", "gemini", "0.25", "1.50", notes="text/image/video share"),
+    _m(
+        "gemini-3.1-flash-lite-preview",
+        "gemini",
+        "0.25",
+        "1.50",
+        notes="text/image/video share",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
     _m("gemini-3.1-flash-lite-image", "gemini", "0.25", "1.50"),
     _m("gemini-3.1-flash-image", "gemini", "0.50", "3.00"),
     _m("gemini-3.1-flash-image-preview", "gemini", "0.50", "3.00"),
-    _m("gemini-3.1-pro-preview", "gemini", "2.00", "12.00"),
-    _m("gemini-3.5-flash", "gemini", "1.50", "9.00"),
-    _m("gemini-3.5-flash-lite", "gemini", "0.30", "2.50"),
-    _m("gemini-3.6-flash", "gemini", "1.50", "7.50"),
-    _m("gemini-pro-latest", "gemini", "2.00", "12.00", notes="floating alias; prefer a pinned id"),
-    _m("gemini-flash-latest", "gemini", "1.50", "9.00", notes="floating alias; prefer a pinned id"),
+    _m(
+        "gemini-3.1-pro-preview",
+        "gemini",
+        "2.00",
+        "12.00",
+        reasoning_efforts=GEMINI_3_PRO_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-3.5-flash",
+        "gemini",
+        "1.50",
+        "9.00",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-3.5-flash-lite",
+        "gemini",
+        "0.30",
+        "2.50",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-3.6-flash",
+        "gemini",
+        "1.50",
+        "7.50",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-pro-latest",
+        "gemini",
+        "2.00",
+        "12.00",
+        notes="floating alias; prefer a pinned id",
+        reasoning_efforts=GEMINI_3_PRO_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-flash-latest",
+        "gemini",
+        "1.50",
+        "9.00",
+        notes="floating alias; prefer a pinned id",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
     _m(
         "gemini-flash-lite-latest",
         "gemini",
         "0.25",
         "1.50",
         notes="floating alias; prefer a pinned id",
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
     ),
     # ---- OpenRouter -----------------------------------------------------
-    _m("google/gemini-2.5-flash-lite", "openrouter", "0.10", "0.40"),
-    _m("google/gemini-2.5-flash-image", "openrouter", "0.30", "2.50"),
     _m("google/gemini-3-flash-preview", "openrouter", "0.50", "3.00"),
     _m("google/gemini-3-pro-preview", "openrouter", "2.00", "12.00"),
     _m("google/gemini-3.1-flash-lite-preview", "openrouter", "0.25", "1.50"),
@@ -185,9 +268,9 @@ def models_by_provider(provider: Provider) -> tuple[ModelInfo, ...]:
 # namespace rule sends it to OpenRouter.
 _PREFIX_RULES: tuple[tuple[str, Provider], ...] = (
     ("openai/gpt-oss", "groq"),
-    ("models/gemini", "gemini"),
+    ("models/gemini-3", "gemini"),
     ("meta-llama/", "groq"),
-    ("gemini", "gemini"),
+    ("gemini-3", "gemini"),
     ("gpt-", "openai"),
     ("chatgpt-", "openai"),
     ("o1", "openai"),
@@ -209,6 +292,9 @@ def resolve_provider(model_id: str) -> Provider | None:
     after the catalogue was last updated; an id that matches nothing returns
     ``None`` rather than being guessed into the wrong provider.
     """
+    if _is_non_three_gemini_model(model_id):
+        return None
+
     catalogued = MODEL_CATALOG.get(model_id)
     if catalogued is not None:
         return catalogued.provider
@@ -222,6 +308,17 @@ def resolve_provider(model_id: str) -> Provider | None:
     if "/" in lowered:
         return "openrouter"
     return None
+
+
+def _is_non_three_gemini_model(model_id: str) -> bool:
+    """Keep removed Gemini generations out of both direct and namespaced routes."""
+    for component in model_id.lower().split("/"):
+        if not component.startswith("gemini-"):
+            continue
+        major = component.removeprefix("gemini-").split(".", 1)[0]
+        if major.isdigit() and major != "3":
+            return True
+    return False
 
 
 def builtin_price_catalog(

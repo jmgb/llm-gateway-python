@@ -22,7 +22,7 @@ from llm_gateway.providers.openrouter import OpenRouterAdapter
 from llm_gateway.registry import ProviderRegistry
 
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
-GEMINI_MODEL_PREFIXES = ("gemini", "models/gemini")
+GEMINI_MODEL_PREFIXES = ("gemini-3", "models/gemini-3")
 GROQ_MODEL_PREFIXES = ("llama", "mixtral", "gemma", "qwen", "kimi", "groq/")
 OPENROUTER_MODEL_PREFIXES = ("openrouter/",)
 """Deliberately short. OpenRouter's catalogued models route by their declared

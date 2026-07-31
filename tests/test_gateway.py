@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from llm_gateway import (
     AllAttemptsFailed,
     AuthenticationError,
-    ConfigurationError,
     CostMeasurement,
     FallbackPolicy,
     LLMGateway,
@@ -49,9 +48,11 @@ class FakeAdapter:
     def __init__(self, *responses: ProviderResponse | Exception) -> None:
         self._queue = list(responses)
         self.calls: list[str] = []
+        self.requests: list[LLMRequest] = []
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         self.calls.append(model)
+        self.requests.append(request)
         item = self._queue.pop(0) if self._queue else _ok("default")
         if isinstance(item, Exception):
             raise item
@@ -242,29 +243,72 @@ class TestRouting:
 
 
 class TestReasoningEffortRouting:
-    async def test_reasoning_effort_is_rejected_for_groq_oss(self) -> None:
+    @pytest.mark.parametrize("effort", ("low", "medium", "high"))
+    async def test_reasoning_effort_is_allowed_for_groq_oss(self, effort: str) -> None:
         adapter = FakeAdapter(_ok("x"))
         adapter.name = "groq"
         registry = ProviderRegistry()
         registry.register(adapter, model_prefixes=("openai/gpt-oss-",))
         gateway = LLMGateway(registry=registry)
 
-        with pytest.raises(ConfigurationError, match="reasoning_effort"):
-            await gateway.generate(_request(model="openai/gpt-oss-120b", reasoning_effort="low"))
+        await gateway.generate(_request(model="openai/gpt-oss-120b", reasoning_effort=effort))
 
-        assert adapter.calls == []
+        assert adapter.calls == ["openai/gpt-oss-120b"]
 
-    async def test_reasoning_effort_is_rejected_for_other_openai_models(self) -> None:
+    async def test_reasoning_effort_is_allowed_for_gemini_3_flash(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "gemini"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("gemini-",))
+        gateway = LLMGateway(registry=registry)
+
+        await gateway.generate(_request(model="gemini-3-flash-preview", reasoning_effort="minimal"))
+
+        assert adapter.calls == ["gemini-3-flash-preview"]
+
+    async def test_an_unsupported_effort_is_downgraded_for_gemini_3_pro(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "gemini"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("gemini-",))
+        gateway = LLMGateway(registry=registry)
+
+        await gateway.generate(_request(model="gemini-3.1-pro-preview", reasoning_effort="max"))
+
+        assert adapter.requests[0].reasoning_effort == "medium"
+
+    async def test_an_unsupported_effort_is_downgraded_before_a_groq_fallback(self) -> None:
+        primary = FakeAdapter(RateLimitedError("429"))
+        primary.name = "openai"
+        fallback = FakeAdapter(_ok("fallback answer"))
+        fallback.name = "groq"
+        registry = ProviderRegistry()
+        registry.register(primary, model_prefixes=("gpt-5.6-",))
+        registry.register(fallback, model_prefixes=("openai/gpt-oss-",))
+        gateway = LLMGateway(registry=registry)
+
+        result = await gateway.generate(
+            _request(
+                model="gpt-5.6-luna",
+                reasoning_effort="max",
+                fallback_policy=FallbackPolicy.models_in_order("openai/gpt-oss-120b"),
+            )
+        )
+
+        assert result.output == "fallback answer"
+        assert primary.requests[0].reasoning_effort == "max"
+        assert fallback.requests[0].reasoning_effort == "medium"
+
+    async def test_reasoning_effort_is_removed_for_a_model_without_reasoning_support(self) -> None:
         adapter = FakeAdapter(_ok("x"))
         adapter.name = "openai"
         registry = ProviderRegistry()
         registry.register(adapter, model_prefixes=("gpt-",))
         gateway = LLMGateway(registry=registry)
 
-        with pytest.raises(ConfigurationError, match="reasoning_effort"):
-            await gateway.generate(_request(model="gpt-5.2-2025-12-11", reasoning_effort="medium"))
+        await gateway.generate(_request(model="gpt-5.2-2025-12-11", reasoning_effort="medium"))
 
-        assert adapter.calls == []
+        assert adapter.requests[0].reasoning_effort is None
 
     async def test_reasoning_effort_is_allowed_for_openai_56_models(self) -> None:
         adapter = FakeAdapter(_ok("x"))

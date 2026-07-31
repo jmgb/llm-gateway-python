@@ -172,6 +172,13 @@ that application's local adapter.
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
 
+Reasoning effort is checked per model before each API attempt. OpenAI 5.6
+models support `none`, `low`, `medium`, `high`, `xhigh`, and `max`; Gemini 3
+Flash supports `minimal`, `low`, `medium`, and `high`; Gemini 3 Pro and Groq
+GPT-OSS support `low`, `medium`, and `high`. If a fallback cannot honour the
+requested effort, the gateway uses `medium` when available and otherwise omits
+the reasoning option.
+
 `[openrouter]` installs the `openai` SDK, because OpenRouter speaks the OpenAI
 wire format and ships none of its own. That is a fact about the transport: the
 adapter, the declared capabilities and the prices are OpenRouter's.

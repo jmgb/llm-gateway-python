@@ -25,7 +25,7 @@ CAPABILITIES = ProviderCapabilities(
     function_calling=True,
     inline_files=True,
     remote_files=True,
-    reasoning_effort=False,
+    reasoning_effort=True,
     conversation_history=True,
     reports_token_usage=True,
 )
@@ -48,7 +48,7 @@ class GeminiAdapter:
                     {"role": _role(m.role), "parts": [{"text": m.content}]}
                     for m in request.messages
                 ],
-                config=self._build_config(request),
+                config=self._build_config(request, model=model),
             )
         except Exception as error:
             raise classify_provider_error(error) from None
@@ -60,7 +60,7 @@ class GeminiAdapter:
             model_used=getattr(raw, "model_version", None),
         )
 
-    def _build_config(self, request: LLMRequest) -> dict[str, Any]:
+    def _build_config(self, request: LLMRequest, *, model: str) -> dict[str, Any]:
         config: dict[str, Any] = {}
         if request.system_prompt:
             config["system_instruction"] = request.system_prompt
@@ -68,6 +68,8 @@ class GeminiAdapter:
             config["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             config["max_output_tokens"] = request.max_output_tokens
+        if request.reasoning_effort is not None and _is_gemini_3(model):
+            config["thinking_config"] = {"thinking_level": request.reasoning_effort}
 
         if request.response_format is ResponseFormat.JSON_OBJECT:
             config["response_mime_type"] = "application/json"
@@ -77,6 +79,10 @@ class GeminiAdapter:
             config["response_mime_type"] = "application/json"
             config["response_json_schema"] = schema.model_json_schema()
         return config
+
+
+def _is_gemini_3(model: str) -> bool:
+    return model.startswith(("gemini-3", "models/gemini-3"))
 
 
 def _role(role: str) -> str:

@@ -41,19 +41,38 @@ class TestIdentity:
         for model_id, info in MODEL_CATALOG.items():
             assert info.id == model_id
 
-    def test_only_openai_56_models_declare_reasoning_efforts(self) -> None:
-        expected = ("none", "low", "medium", "high", "xhigh", "max")
+    def test_reasoning_efforts_are_declared_per_model(self) -> None:
+        openai_expected = ("none", "low", "medium", "high", "xhigh", "max")
 
         for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
             info = lookup_model(model_id)
             assert info is not None
             assert info.provider == "openai"
-            assert info.reasoning_efforts == expected
+            assert info.reasoning_efforts == openai_expected
+
+        for model_id in (
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+        ):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.reasoning_efforts == ("minimal", "low", "medium", "high")
+
+        for model_id in ("gemini-3-pro-preview", "gemini-3.1-pro-preview"):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.reasoning_efforts == ("low", "medium", "high")
+
+        assert lookup_model("gemini-2.5-flash") is None
+        assert lookup_model("gemini-2.5-flash-lite") is None
 
         oss = lookup_model("openai/gpt-oss-120b")
         assert oss is not None
         assert oss.provider == "groq"
-        assert oss.reasoning_efforts == ()
+        assert oss.reasoning_efforts == ("low", "medium", "high")
 
 
 class TestProviderRouting:
@@ -69,6 +88,10 @@ class TestProviderRouting:
 
     def test_a_models_prefixed_gemini_id_routes_to_gemini(self) -> None:
         assert resolve_provider("models/gemini-3.5-flash-lite") == "gemini"
+
+    def test_removed_gemini_25_models_are_not_routable(self) -> None:
+        assert resolve_provider("gemini-2.5-flash") is None
+        assert resolve_provider("google/gemini-2.5-flash") is None
 
     def test_an_uncatalogued_gpt_routes_to_openai(self) -> None:
         assert resolve_provider("gpt-6-unreleased") == "openai"

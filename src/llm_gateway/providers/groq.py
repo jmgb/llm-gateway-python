@@ -19,7 +19,7 @@ CAPABILITIES = ProviderCapabilities(
     function_calling=True,
     inline_files=False,
     remote_files=False,
-    reasoning_effort=False,
+    reasoning_effort=True,
     conversation_history=True,
     reports_token_usage=True,
 )
@@ -43,6 +43,8 @@ class GroqAdapter:
             kwargs["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             kwargs["max_tokens"] = request.max_output_tokens
+        if request.reasoning_effort is not None and model.startswith("openai/gpt-oss-"):
+            kwargs["reasoning_effort"] = request.reasoning_effort
         if request.response_format in (ResponseFormat.JSON_OBJECT, ResponseFormat.JSON_SCHEMA):
             # Groq does not enforce a schema; asking for JSON is the most this
             # provider can honestly promise, and the gateway validates after.

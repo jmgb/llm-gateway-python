@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 
 from pydantic import ValidationError
 
@@ -28,7 +29,6 @@ from llm_gateway.contracts import (
 )
 from llm_gateway.errors import (
     AllAttemptsFailed,
-    ConfigurationError,
     LLMGatewayError,
     ProviderError,
     ProviderTimeoutError,
@@ -100,11 +100,13 @@ class LLMGateway:
         plan = [request.model, *request.fallback_policy.models]
         for model in plan:
             self._registry.resolve(model)
-        _validate_reasoning_effort(request, plan)
+        requests_by_model = {model: _request_for_model(request, model) for model in plan}
 
         for model in plan:
             adapter = self._registry.resolve(model)
-            outcome = await self._attempt_model(request, model=model, attempts=attempts)
+            outcome = await self._attempt_model(
+                requests_by_model[model], model=model, attempts=attempts
+            )
             if outcome is None:
                 continue
 
@@ -266,19 +268,23 @@ def _record_attempt(
     )
 
 
-def _validate_reasoning_effort(request: LLMRequest, plan: list[str]) -> None:
-    """Reject reasoning options before any provider call can spend money."""
+def _request_for_model(request: LLMRequest, model: str) -> LLMRequest:
+    """Adapt reasoning before a model attempt so a fallback cannot receive an invalid option."""
     effort = request.reasoning_effort
     if effort is None:
-        return
+        return request
 
-    for model in plan:
-        info = lookup_model(model)
-        if info is None or info.provider != "openai" or effort not in info.reasoning_efforts:
-            raise ConfigurationError(
-                f"reasoning_effort={effort!r} is only supported for the OpenAI 5.6 "
-                f"models sol, terra, and luna; model {model!r} cannot use it"
-            )
+    info = lookup_model(model)
+    if info is not None and effort in info.reasoning_efforts:
+        return request
+
+    if info is not None and "medium" in info.reasoning_efforts:
+        return replace(request, reasoning_effort="medium")
+
+    # Unknown and non-thinking models must not receive a provider-specific
+    # reasoning field that the API may reject. The fallback still remains
+    # visible in execution; only this request option is removed.
+    return replace(request, reasoning_effort=None)
 
 
 def _aggregate(attempts: list[Attempt]) -> tuple[TokenUsage, Cost]:

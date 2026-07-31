@@ -15,8 +15,14 @@ consumer pins an immutable tag and upgrades through its own pull request.
   output MTok.
 - Updated `gpt-5.6-terra` pricing to USD 2.00 per input MTok and USD 12.00 per
   output MTok; recorded its 128K-token maximum output.
-- Restricted reasoning efforts (`none`, `low`, `medium`, `high`, `xhigh`, and
-  `max`) to the OpenAI `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` models.
+- Made reasoning efforts model-specific: OpenAI 5.6 keeps `none`, `low`,
+  `medium`, `high`, `xhigh`, and `max`; Gemini 3 Flash supports `minimal`,
+  `low`, `medium`, and `high`; Gemini 3 Pro supports `low`, `medium`, and
+  `high`; and Groq GPT-OSS supports `low`, `medium`, and `high`.
+- Reasoning is adapted before every attempt. An unsupported effort becomes
+  `medium` when the target model supports it; otherwise the reasoning option is
+  omitted so a fallback cannot receive an invalid provider parameter.
+- Removed legacy Gemini model entries from the direct and OpenRouter catalogues.
 
 ## [0.5.0] — 2026-07-30
 
