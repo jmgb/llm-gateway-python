@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-31
+
 ### Changed
 
 - Updated `gpt-5.6-luna` pricing to USD 0.20 per input MTok and USD 1.20 per
