@@ -103,7 +103,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+# scripts/ is included because the release runner and the artifact audit decide
+# what reaches a package index, and an upload cannot be taken back.
+files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 # Provider SDKs are optional extras. Type checking must pass with none of them

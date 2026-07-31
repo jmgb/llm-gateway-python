@@ -20,6 +20,8 @@ class ProviderRegistry:
 
     def register(self, adapter: ProviderAdapter, *, model_prefixes: tuple[str, ...]) -> None:
         """Register an adapter for every model whose id starts with a prefix."""
+        if adapter.name in self._by_name:
+            raise ValueError(f"provider {adapter.name!r} is already registered")
         self._by_name[adapter.name] = adapter
         for prefix in model_prefixes:
             self._by_prefix.append((prefix, adapter))

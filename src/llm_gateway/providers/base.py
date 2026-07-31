@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest
 from llm_gateway.usage import TokenUsage
 
@@ -35,7 +34,3 @@ class ProviderAdapter(Protocol):
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         """Perform exactly one call. Raise a typed error; never return one."""
         ...
-
-
-def default_capabilities() -> ProviderCapabilities:
-    return ProviderCapabilities()

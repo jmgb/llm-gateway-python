@@ -13,10 +13,12 @@ from llm_gateway import (
     LLMGateway,
     LLMRequest,
     Message,
+    ProviderRegistry,
     ProviderResponse,
     TokenUsage,
 )
 from llm_gateway.factories import build_registry
+from llm_gateway.models import lookup_model
 
 
 class StubAdapter:
@@ -54,7 +56,7 @@ class TestRoutingUsesTheCatalogue:
 class TestDefaultPricing:
     async def test_the_gateway_prices_with_the_shared_catalogue_by_default(self) -> None:
         adapter = StubAdapter("gemini")
-        registry = build_registry(gemini_client=SimpleNamespace())
+        registry = ProviderRegistry()
         registry.register(adapter, model_prefixes=("gemini-3.5-flash-lite",))
         gateway = LLMGateway(registry=registry)
 
@@ -70,7 +72,7 @@ class TestDefaultPricing:
         from llm_gateway import ModelRate, StaticPriceCatalog
 
         adapter = StubAdapter("gemini")
-        registry = build_registry(gemini_client=SimpleNamespace())
+        registry = ProviderRegistry()
         registry.register(adapter, model_prefixes=("gemini-3.5-flash-lite",))
         gateway = LLMGateway(
             registry=registry,
@@ -90,14 +92,17 @@ class TestDefaultPricing:
 
 class TestCatalogueAwareFallback:
     def test_cheaper_alternatives_are_ordered_by_price(self) -> None:
-        policy = FallbackPolicy.cheaper_than("gemini-3.6-flash", limit=2)
+        policy = FallbackPolicy.cheaper_than("gemini-3.6-flash", limit=5)
 
-        assert policy.models
-        assert "gemini-3.6-flash" not in policy.models
+        prices = []
+        for model in policy.models:
+            info = lookup_model(model)
+            assert info is not None
+            prices.append(info.input_usd_per_mtok + info.output_usd_per_mtok)
+
+        assert prices == sorted(prices)
 
     def test_alternatives_stay_within_the_same_provider(self) -> None:
-        from llm_gateway.models import lookup_model
-
         policy = FallbackPolicy.cheaper_than("gemini-3.6-flash", limit=3)
 
         for model in policy.models:
@@ -115,8 +120,6 @@ class TestCatalogueAwareFallback:
             FallbackPolicy.cheaper_than("model-that-does-not-exist")
 
     def test_deprecated_models_are_never_proposed_as_fallback(self) -> None:
-        from llm_gateway.models import lookup_model
-
         policy = FallbackPolicy.cheaper_than("gpt-5.6-sol", limit=5)
 
         for model in policy.models:

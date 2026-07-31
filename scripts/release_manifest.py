@@ -21,6 +21,21 @@ SECRET_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 # a guard that passes and a guard that blocks every release until disabled.
 PUBLISHABLE_DOTFILES = frozenset({".python-version", ".gitignore"})
 
+# Everything the upload itself authenticates with, and nothing else. A local
+# `.env` is not a publishing config: it is whatever the machine happens to
+# hold, and the rest of it has no business in the environment of `uv publish`
+# or `gh`.
+PUBLISHING_ENV_KEYS = frozenset(
+    {
+        "UV_PUBLISH_TOKEN",
+        "UV_PUBLISH_USERNAME",
+        "UV_PUBLISH_PASSWORD",
+        "UV_PUBLISH_URL",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+    }
+)
+
 
 def local_env_values(text: str) -> dict[str, str]:
     """Parse ``KEY=VALUE`` lines from a local ``.env``.
@@ -51,6 +66,19 @@ def local_env_values(text: str) -> dict[str, str]:
     return values
 
 
+def publishing_env_values(text: str) -> dict[str, str]:
+    """The publishing credentials in a local ``.env``, and nothing else beside them.
+
+    The file is read for one purpose, so only what serves that purpose leaves
+    it. Handing the whole thing to the upload would put every unrelated key on
+    this machine into the environment of two processes that never asked for
+    one — and into whatever they log or forward.
+    """
+    return {
+        key: value for key, value in local_env_values(text).items() if key in PUBLISHING_ENV_KEYS
+    }
+
+
 def unpublishable_members(names: Iterable[str]) -> list[str]:
     """Paths in a built artifact that must never reach a package index.
 
@@ -78,7 +106,7 @@ def version_parts(version: str) -> tuple[int, int, int]:
     match = VERSION_PATTERN.fullmatch(version)
     if match is None:
         raise ValueError(f"version must use X.Y.Z format: {version!r}")
-    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+    return int(match[1]), int(match[2]), int(match[3])
 
 
 def bump_version(current: str, kind: str) -> str:

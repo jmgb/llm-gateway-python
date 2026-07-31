@@ -27,7 +27,7 @@ amount carries the version that produced it, so old numbers stay reconcilable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 
 from llm_gateway.contracts import ReasoningEffort
@@ -73,8 +73,7 @@ class ModelInfo:
     output_usd_per_mtok: Decimal
     deprecated: bool = False
     notes: str = ""
-    aliases: tuple[str, ...] = field(default=())
-    reasoning_efforts: tuple[ReasoningEffort, ...] = field(default=())
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
     supports_temperature: bool = True
     """False for models whose API rejects the option outright.
 

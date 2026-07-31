@@ -271,6 +271,12 @@ class TestDeclaredRequestOptions:
 
 
 class TestModelInfo:
+    def test_it_has_no_unused_alias_surface(self) -> None:
+        info = lookup_model("gpt-5.6-luna")
+
+        assert info is not None
+        assert not hasattr(info, "aliases")
+
     def test_a_rate_is_derived_from_the_declared_price(self) -> None:
         info = ModelInfo(
             id="x",

@@ -7,9 +7,8 @@ Three rules the rest of the package depends on:
   bound, never a silent ``ACTUAL``;
 * arithmetic happens in whole microdollars so that totals reconcile exactly.
 
-Catalogues are injected. The package ships no prices of its own, because the
-authority on what a model costs is the consuming application, which already
-has to reconcile it against a provider invoice.
+The gateway uses the package's versioned catalogue by default. Applications
+can inject a different catalogue for negotiated or dynamic rates.
 """
 
 from __future__ import annotations

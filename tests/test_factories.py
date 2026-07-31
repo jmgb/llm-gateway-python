@@ -7,7 +7,7 @@ not an ImportError traceback.
 
 import pytest
 
-from llm_gateway import ProviderNotInstalled, ProviderRegistry
+from llm_gateway import LLMRequest, ProviderNotInstalled, ProviderRegistry, ProviderResponse
 from llm_gateway.factories import (
     build_registry,
     create_gemini_client,
@@ -19,6 +19,9 @@ from llm_gateway.factories import (
 
 class FakeAdapter:
     name = "fake"
+
+    async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
+        raise AssertionError("registration never calls the adapter")
 
 
 def test_a_missing_extra_names_the_install_command() -> None:
@@ -71,6 +74,16 @@ def test_build_registry_routes_known_model_families() -> None:
 def test_an_empty_registry_is_rejected_rather_than_silently_useless() -> None:
     with pytest.raises(ValueError, match="at least one"):
         build_registry()
+
+
+def test_registering_the_same_provider_twice_is_rejected_before_it_is_overwritten() -> None:
+    registry = ProviderRegistry()
+    registry.register(FakeAdapter(), model_prefixes=("first-",))
+
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(FakeAdapter(), model_prefixes=("second-",))
+
+    assert registry.resolve("first-model").name == "fake"
 
 
 class TestOpenRouter:

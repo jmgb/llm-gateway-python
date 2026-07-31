@@ -63,11 +63,17 @@ class FakeAdapter:
         return item
 
 
-def _ok(text: str, *, usage: TokenUsage | None = None) -> ProviderResponse:
+def _ok(
+    text: str,
+    *,
+    usage: TokenUsage | None = None,
+    model_used: str | None = None,
+) -> ProviderResponse:
     return ProviderResponse(
         output_text=text,
         usage=usage or TokenUsage(input_tokens=10, output_tokens=5),
         finish_reason="stop",
+        model_used=model_used,
     )
 
 
@@ -104,6 +110,14 @@ class TestHappyPath:
     async def test_no_fallback_means_no_fallback_flag(self) -> None:
         result = await _gateway(FakeAdapter(_ok("x"))).generate(_request())
 
+        assert result.execution.fallback_used is False
+
+    async def test_the_provider_reported_model_does_not_imply_a_gateway_fallback(self) -> None:
+        result = await _gateway(FakeAdapter(_ok("x", model_used="fast-2026-07-31"))).generate(
+            _request()
+        )
+
+        assert result.execution.model_used == "fast-2026-07-31"
         assert result.execution.fallback_used is False
 
 
@@ -159,7 +173,10 @@ class TestFallback:
         assert adapter.calls == ["fast", "slow"]
 
     async def test_a_fallback_is_always_visible_in_the_result(self) -> None:
-        adapter = FakeAdapter(RateLimitedError("429"), _ok("from slow"))
+        adapter = FakeAdapter(
+            RateLimitedError("429"),
+            _ok("from slow", model_used="slow-2026-07-31"),
+        )
 
         result = await _gateway(adapter).generate(
             _request(fallback_policy=FallbackPolicy.models_in_order("slow"))
@@ -167,7 +184,7 @@ class TestFallback:
 
         assert result.execution.fallback_used is True
         assert result.execution.requested_model == "fast"
-        assert result.execution.model_used == "slow"
+        assert result.execution.model_used == "slow-2026-07-31"
 
 
 class TestCostAggregation:
@@ -190,6 +207,9 @@ class TestCostAggregation:
 class TestStructuredOutput:
     class Answer(BaseModel):
         veredicto: str
+
+    class KeyedAnswer(BaseModel):
+        values: dict[int, str]
 
     async def test_json_schema_output_is_validated_into_the_model(self) -> None:
         adapter = FakeAdapter(_ok('{"veredicto": "estimado"}'))
@@ -231,6 +251,36 @@ class TestStructuredOutput:
         assert isinstance(caught.value.__cause__, SchemaValidationError), (
             "the exhausted call must still say why the output was unusable"
         )
+
+    async def test_a_schema_error_names_each_pydantic_location_and_type(self) -> None:
+        adapter = FakeAdapter(_ok('{"otra_cosa": 1}'))
+
+        with pytest.raises(AllAttemptsFailed) as caught:
+            await _gateway(adapter).generate(
+                _request(
+                    response_format=ResponseFormat.JSON_SCHEMA,
+                    response_schema=TestStructuredOutput.Answer,
+                )
+            )
+
+        message = str(caught.value.__cause__)
+        assert "loc=('veredicto',)" in message
+        assert "type=missing" in message
+
+    async def test_a_schema_error_does_not_copy_a_dynamic_key_from_the_response(self) -> None:
+        adapter = FakeAdapter(_ok('{"values": {"response-secret": "x"}}'))
+
+        with pytest.raises(AllAttemptsFailed) as caught:
+            await _gateway(adapter).generate(
+                _request(
+                    response_format=ResponseFormat.JSON_SCHEMA,
+                    response_schema=TestStructuredOutput.KeyedAnswer,
+                )
+            )
+
+        message = str(caught.value.__cause__)
+        assert "response-secret" not in message
+        assert "loc=('values', '<dynamic>', '<dynamic>') type=int_parsing" in message
 
     async def test_json_object_output_is_returned_as_a_dict(self) -> None:
         adapter = FakeAdapter(_ok('{"a": 1}'))

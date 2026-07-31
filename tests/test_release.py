@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import sys
+import tarfile
 import tomllib
 from pathlib import Path
 
@@ -10,10 +12,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.audit_dist import artifacts_in
+from scripts.audit_dist import main as audit_dist_main
 from scripts.release_manifest import (
     bump_version,
     local_env_values,
     promote_unreleased,
+    publishing_env_values,
     replace_lock_version,
     replace_project_version,
     unpublishable_members,
@@ -180,3 +185,91 @@ class TestTheSdistDeclaresWhatItShips:
         assert all(entry.startswith("/") for entry in include), (
             "unanchored patterns match at any depth, which is how a stray file gets in"
         )
+
+
+class TestTheDefaultAuditScopeIsTheVersionBeingReleased:
+    """`dist/` accumulates; the release does not.
+
+    Auditing every artifact ever built means the command fails on last year's
+    sdist and keeps failing, and an alarm that is always on is one nobody reads.
+    A directory named explicitly is audited whole — that is the post-publish
+    check, where everything present was just downloaded on purpose.
+    """
+
+    @staticmethod
+    def _touch(directory: Path, *names: str) -> None:
+        for name in names:
+            (directory / name).write_bytes(b"")
+
+    def test_a_version_selects_only_its_own_artifacts(self, tmp_path: Path) -> None:
+        self._touch(
+            tmp_path,
+            "pkg-0.7.0.tar.gz",
+            "pkg-0.7.0-py3-none-any.whl",
+            "pkg-0.6.0.tar.gz",
+            "pkg-10.7.0.tar.gz",
+            "pkg-0.7.0rc1.tar.gz",
+        )
+
+        found = [path.name for path in artifacts_in(tmp_path, version="0.7.0")]
+
+        assert found == ["pkg-0.7.0-py3-none-any.whl", "pkg-0.7.0.tar.gz"]
+
+    def test_without_a_version_everything_present_is_audited(self, tmp_path: Path) -> None:
+        self._touch(tmp_path, "pkg-0.7.0.tar.gz", "pkg-0.6.0.tar.gz")
+
+        assert len(artifacts_in(tmp_path)) == 2
+
+    def test_a_non_artifact_is_never_selected(self, tmp_path: Path) -> None:
+        self._touch(
+            tmp_path,
+            "pkg-0.7.0.tar.gz",
+            "pkg-0.7.0.tar.gz.asc",
+            "pkg-0.7.0.tar.gz.part",
+            "pkg-0.7.0.txt",
+            "notes-0.7.0.md",
+        )
+
+        assert [path.name for path in artifacts_in(tmp_path)] == ["pkg-0.7.0.tar.gz"]
+
+
+class TestTheStandaloneAuditorStopsTheJob:
+    """The workflow reads nothing but the exit status, so it is the contract."""
+
+    @staticmethod
+    def _sdist(directory: Path, name: str, *members: str) -> None:
+        with tarfile.open(directory / name, "w:gz") as archive:
+            for member in members:
+                info = tarfile.TarInfo(member)
+                info.size = 0
+                archive.addfile(info, io.BytesIO(b""))
+
+    def test_an_archive_carrying_a_local_file_fails(self, tmp_path: Path) -> None:
+        self._sdist(tmp_path, "pkg-0.7.0.tar.gz", "pkg-0.7.0/src/x.py", "pkg-0.7.0/.env")
+
+        assert audit_dist_main([str(tmp_path)]) == 1
+
+    def test_a_clean_archive_passes(self, tmp_path: Path) -> None:
+        self._sdist(tmp_path, "pkg-0.7.0.tar.gz", "pkg-0.7.0/src/x.py", "pkg-0.7.0/README.md")
+
+        assert audit_dist_main([str(tmp_path)]) == 0
+
+    def test_an_empty_directory_fails_rather_than_reporting_success(self, tmp_path: Path) -> None:
+        """Nothing audited is not the same as nothing wrong, and the difference is an upload."""
+        assert audit_dist_main([str(tmp_path)]) == 1
+
+
+class TestOnlyPublishingCredentialsAreExported:
+    """A local `.env` is not a publishing config; it is whatever the machine holds.
+
+    Handing all of it to `uv publish` and `gh` puts every unrelated key in the
+    environment of two processes that have no use for them.
+    """
+
+    ENV = "UV_PUBLISH_TOKEN=publish-me\nGOOGLE_API_KEY=unrelated\nGH_TOKEN=gh\n"
+
+    def test_the_publishing_token_is_kept(self) -> None:
+        assert publishing_env_values(self.ENV)["UV_PUBLISH_TOKEN"] == "publish-me"
+
+    def test_everything_the_upload_does_not_need_is_dropped(self) -> None:
+        assert set(publishing_env_values(self.ENV)) == {"UV_PUBLISH_TOKEN", "GH_TOKEN"}

@@ -128,8 +128,8 @@ result.output  # Answer instance — no metadata mixed in
 result.usage.input_tokens  # None means "not reported", not zero
 result.cost.amount_usd  # None when unavailable, never a fake 0
 result.cost.measurement  # ACTUAL | ESTIMATED | UNAVAILABLE
-result.execution.model_used  # what actually answered
-result.execution.fallback_used  # a fallback is never silent
+result.execution.model_used  # provider-reported model that actually answered
+result.execution.fallback_used  # whether the gateway used its fallback plan
 result.execution.attempts  # every attempt, including the failed ones
 ```
 
@@ -138,6 +138,8 @@ violates `Answer`, that attempt is recorded as failed **and billed** — the
 tokens were spent — and the next model in `fallback_policy` is tried. When no
 model produces a usable answer the call raises `AllAttemptsFailed`, carrying
 every attempt, with the parsing or schema error as its `__cause__`.
+Schema validation errors name each Pydantic `loc` and `type`, while dynamic
+response keys and values stay out of the message.
 
 ## The guarantees
 

@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from llm_gateway.contracts import (
     Attempt,
@@ -53,7 +53,7 @@ from llm_gateway.ports import (
     UsageSink,
     execution_to_record,
 )
-from llm_gateway.pricing import Cost, CostMeasurement, PriceCatalog
+from llm_gateway.pricing import Cost, PriceCatalog
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import TokenUsage
@@ -131,7 +131,7 @@ class LLMGateway:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             execution = Execution(
                 requested_model=request.model,
-                model_used=model,
+                model_used=outcome.response.model_used or model,
                 provider=adapter.name,
                 finish_reason=outcome.response.finish_reason,
                 attempts=tuple(attempts),
@@ -145,7 +145,7 @@ class LLMGateway:
                     "llm_fallback_used",
                     {
                         "requested_model": request.model,
-                        "model_used": model,
+                        "model_used": execution.model_used,
                         "request_id": request.request_id,
                     },
                 )
@@ -397,9 +397,38 @@ def _interpret(response: ProviderResponse, request: LLMRequest) -> object:
     try:
         return schema.model_validate(payload)
     except ValidationError as error:
+        field_names = _schema_field_names(schema)
+        details = []
+        for item in error.errors():
+            location = tuple(
+                part
+                if isinstance(part, int) or (isinstance(part, str) and part in field_names)
+                else "<dynamic>"
+                for part in item["loc"]
+            )
+            details.append(f"loc={location!r} type={item['type']}")
         raise SchemaValidationError(
-            f"the response did not satisfy {schema.__name__}: {error.error_count()} violation(s)"
+            f"the response did not satisfy {schema.__name__}: "
+            f"{error.error_count()} violation(s): {'; '.join(details)}"
         ) from error
+
+
+def _schema_field_names(schema: type[BaseModel]) -> set[str]:
+    """Names from the schema are safe to log; dynamic response keys are not."""
+    names: set[str] = set()
+    pending: list[object] = [schema.model_json_schema()]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, list):
+            pending.extend(node)
+            continue
+        if not isinstance(node, dict):
+            continue
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            names.update(key for key in properties if isinstance(key, str))
+        pending.extend(node.values())
+    return names
 
 
 def _event_fields(request: LLMRequest, execution: Execution, cost: Cost) -> dict[str, object]:
@@ -415,8 +444,6 @@ def _event_fields(request: LLMRequest, execution: Execution, cost: Cost) -> dict
         "latency_ms": execution.latency_ms,
         "finish_reason": execution.finish_reason,
         "cost_microusd": cost.microusd,
-        "cost_measurement": cost.measurement.value
-        if isinstance(cost.measurement, CostMeasurement)
-        else None,
+        "cost_measurement": cost.measurement.value,
         "pricing_version": cost.pricing_version,
     }

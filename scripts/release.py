@@ -9,19 +9,18 @@ import os
 import shlex
 import subprocess
 import sys
-import tarfile
-import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.audit_dist import archive_members, artifacts_in
 from scripts.release_manifest import (
     bump_version,
-    local_env_values,
     project_version,
     promote_unreleased,
+    publishing_env_values,
     replace_lock_version,
     replace_project_version,
     unpublishable_members,
@@ -64,7 +63,10 @@ def _publishing_environment() -> dict[str, str]:
     """
     environment = dict(os.environ)
     if ENV_FILE.exists():
-        for key, value in local_env_values(ENV_FILE.read_text(encoding="utf-8")).items():
+        # Only the publishing keys: the file is read for one purpose, and the
+        # rest of what a machine keeps in it has no business in the environment
+        # of `uv publish` or `gh`.
+        for key, value in publishing_env_values(ENV_FILE.read_text(encoding="utf-8")).items():
             environment.setdefault(key, value)
     return environment
 
@@ -90,15 +92,12 @@ def _checks() -> None:
 
 
 def _artifacts_for(version: str) -> list[Path]:
-    return sorted((ROOT / "dist").glob(f"*{version}*"))
+    """This version's distributions, shared with the standalone auditor.
 
-
-def _archive_members(path: Path) -> list[str]:
-    if path.suffix == ".whl":
-        with zipfile.ZipFile(path) as archive:
-            return archive.namelist()
-    with tarfile.open(path) as archive:
-        return archive.getnames()
+    Selecting them differently in the two publishers is how a file gets audited
+    by one and uploaded by the other.
+    """
+    return artifacts_in(ROOT / "dist", version=version)
 
 
 def _audit_artifacts(version: str) -> None:
@@ -113,13 +112,14 @@ def _audit_artifacts(version: str) -> None:
     if not artifacts:
         raise RuntimeError(f"no build artifacts found for {version}")
     for path in artifacts:
-        offenders = unpublishable_members(_archive_members(path))
+        members = archive_members(path)
+        offenders = unpublishable_members(members)
         if offenders:
             raise RuntimeError(
                 f"{path.name} would publish {offenders}; "
                 f"remove them from the sdist include list before releasing"
             )
-        print(f"  audited {path.name}: {len(_archive_members(path))} files, nothing local")
+        print(f"  audited {path.name}: {len(members)} files, nothing local")
 
 
 def _parser() -> argparse.ArgumentParser:

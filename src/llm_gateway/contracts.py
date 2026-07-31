@@ -131,8 +131,8 @@ class Execution:
 
     @property
     def fallback_used(self) -> bool:
-        """True when the answer came from a model the caller did not request."""
-        return self.model_used != self.requested_model
+        """True when the gateway reached a model from its fallback plan."""
+        return bool(self.attempts and self.attempts[-1].model != self.requested_model)
 
     @property
     def attempt_count(self) -> int:

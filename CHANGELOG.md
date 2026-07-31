@@ -9,6 +9,32 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release artifact selection now ignores signatures, partial downloads, files
+  for similar version numbers, and stale distributions from earlier releases.
+  The local uploader and the standalone audit now share the same selection;
+  GitHub runs that audit immediately before its publishing action.
+- Local publishing reads only publishing credentials from `.env`, rather than
+  exposing unrelated values to the publishing subprocesses.
+- `SchemaValidationError` now reports each Pydantic violation's location and
+  type without copying dynamic keys or other response content into the error.
+- `FallbackPolicy.cheaper_than()` now returns the cheapest candidates first,
+  matching its documented contract.
+- `Execution.model_used` now honours the model id reported by the provider.
+  `fallback_used` continues to mean that the gateway used its fallback plan,
+  so a provider alias or an `openrouter/auto` resolution does not trigger it.
+
+### Changed
+
+- Static type checking now includes the release and artifact-audit scripts.
+- `ProviderRegistry.register()` rejects a second adapter with the same provider
+  name instead of leaving name and prefix routing pointed at different clients.
+
+### Removed
+
+- Removed the unused `ModelInfo.aliases` field. It was never populated or read.
+
 ## [0.7.0] — 2026-07-31
 
 ### Fixed

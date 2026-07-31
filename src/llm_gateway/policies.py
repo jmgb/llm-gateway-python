@@ -7,7 +7,7 @@ cost attribution, so switching models is always an opt-in decision.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
@@ -57,7 +57,7 @@ class RetryPolicy:
 class FallbackPolicy:
     """Alternative models to try after the requested one is exhausted."""
 
-    models: tuple[str, ...] = field(default=())
+    models: tuple[str, ...] = ()
 
     @classmethod
     def disabled(cls) -> FallbackPolicy:
@@ -65,7 +65,7 @@ class FallbackPolicy:
 
     @classmethod
     def models_in_order(cls, *models: str) -> FallbackPolicy:
-        return cls(models=tuple(models))
+        return cls(models=models)
 
     @classmethod
     def cheaper_than(cls, model: str, *, limit: int = 1) -> FallbackPolicy:
@@ -98,7 +98,7 @@ class FallbackPolicy:
             and candidate.id != current.id
             and total_price(candidate) < total_price(current)
         ]
-        cheaper.sort(key=total_price, reverse=True)
+        cheaper.sort(key=total_price)
         return cls(models=tuple(info.id for info in cheaper[:limit]))
 
     @property
