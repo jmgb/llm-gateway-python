@@ -4,10 +4,13 @@ One place decides how many times to try, when to switch model, what each
 attempt cost and what the caller finally sees. Adapters stay thin because this
 does not live in them.
 
-Two invariants worth stating out loud:
+Three invariants worth stating out loud:
 
 * every attempt that reached the provider is recorded and billed, including
   the ones that failed, because a retry that timed out may still be invoiced;
+* an answer that cannot be parsed or does not satisfy the schema is one of
+  those failures, decided *inside* the attempt loop rather than after it, so
+  the fallback still has a turn and the money is still counted;
 * an exhausted call raises. It never returns a result that looks successful.
 """
 
@@ -15,7 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -23,19 +27,22 @@ from llm_gateway.contracts import (
     Attempt,
     AttemptOutcome,
     Execution,
+    FailurePhase,
     LLMRequest,
     LLMResult,
+    ReasoningEffort,
     ResponseFormat,
 )
 from llm_gateway.errors import (
     AllAttemptsFailed,
     LLMGatewayError,
+    OutputError,
     ProviderError,
     ProviderTimeoutError,
     SchemaValidationError,
 )
 from llm_gateway.json_payload import parse_json_payload
-from llm_gateway.models import builtin_price_catalog, lookup_model
+from llm_gateway.models import ModelInfo, builtin_price_catalog, lookup_model
 from llm_gateway.ports import (
     AlertSink,
     EventSink,
@@ -49,6 +56,14 @@ from llm_gateway.pricing import Cost, CostMeasurement, PriceCatalog
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import TokenUsage
+
+
+@dataclass(frozen=True, slots=True)
+class _Completion:
+    """An attempt that produced output the caller can actually be given."""
+
+    response: ProviderResponse
+    output: Any
 
 
 class LLMGateway:
@@ -102,12 +117,14 @@ class LLMGateway:
             self._registry.resolve(model)
         requests_by_model = {model: _request_for_model(request, model) for model in plan}
 
+        last_failure: LLMGatewayError | None = None
         for model in plan:
             adapter = self._registry.resolve(model)
             outcome = await self._attempt_model(
                 requests_by_model[model], model=model, attempts=attempts
             )
-            if outcome is None:
+            if not isinstance(outcome, _Completion):
+                last_failure = outcome
                 continue
 
             elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -115,12 +132,12 @@ class LLMGateway:
                 requested_model=request.model,
                 model_used=model,
                 provider=adapter.name,
-                finish_reason=outcome.finish_reason,
+                finish_reason=outcome.response.finish_reason,
                 attempts=tuple(attempts),
                 latency_ms=elapsed_ms,
             )
             usage, cost = _aggregate(attempts)
-            output = _interpret(outcome, request)
+            output = outcome.output
 
             if execution.fallback_used:
                 self._alerts.alert(
@@ -148,7 +165,9 @@ class LLMGateway:
         raise AllAttemptsFailed(
             f"all {len(attempts)} attempt(s) failed for model {request.model!r}",
             attempts=tuple(attempts),
-        )
+            # Chained, not swallowed: an exhausted call must still be able to
+            # say whether it ran out of provider or out of usable answers.
+        ) from last_failure
 
     def _report_failure(
         self,
@@ -189,8 +208,12 @@ class LLMGateway:
         *,
         model: str,
         attempts: list[Attempt],
-    ) -> ProviderResponse | None:
-        """Try one model until its retry policy is exhausted."""
+    ) -> _Completion | LLMGatewayError:
+        """Try one model until its retry policy is exhausted.
+
+        Returns the completion, or the failure that ended this model's turn —
+        which the caller uses to decide whether a fallback still applies.
+        """
         adapter = self._registry.resolve(model)
         policy = request.retry_policy
 
@@ -207,18 +230,45 @@ class LLMGateway:
             except LLMGatewayError as error:
                 failure = error
             else:
+                usage = response.usage
+                cost = self._prices.estimate(model, usage)
+                try:
+                    output = _interpret(response, request)
+                except OutputError as unusable:
+                    # The provider answered and will invoice for it, so the
+                    # tokens it reported are recorded exactly as on a success.
+                    # What is not recorded is a result: this attempt failed.
+                    attempts.append(
+                        _record_attempt(
+                            index=len(attempts) + 1,
+                            model=model,
+                            provider=adapter.name,
+                            outcome=AttemptOutcome.FAILED,
+                            usage=usage,
+                            cost=cost,
+                            started=attempt_started,
+                            error_type=type(unusable).__name__,
+                            failure_phase=_phase_of(unusable),
+                        )
+                    )
+                    # Deliberately not retried on the same model: the same
+                    # prompt and the same model reproduce the same malformed
+                    # answer, so a retry buys a second invoice for one failure.
+                    # The next model in the plan gets the turn instead.
+                    return unusable
+
                 attempts.append(
                     _record_attempt(
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
                         outcome=AttemptOutcome.SUCCEEDED,
-                        usage=response.usage,
-                        cost=self._prices.estimate(model, response.usage),
+                        usage=usage,
+                        cost=cost,
                         started=attempt_started,
                     )
                 )
-                return response
+                return _Completion(response=response, output=output)
 
             attempts.append(
                 _record_attempt(
@@ -233,14 +283,15 @@ class LLMGateway:
                     started=attempt_started,
                     error_type=type(failure).__name__,
                     billable=isinstance(failure, ProviderError),
+                    failure_phase=_phase_of(failure),
                 )
             )
             if not policy.should_retry(failure, attempt_number=attempt_number):
-                return None
+                return failure
             delay = policy.delay_before(attempt_number=attempt_number)
             if delay:
                 await asyncio.sleep(delay)
-        return None
+        return failure
 
 
 def _record_attempt(
@@ -254,6 +305,7 @@ def _record_attempt(
     started: float,
     error_type: str | None = None,
     billable: bool = True,
+    failure_phase: FailurePhase | None = None,
 ) -> Attempt:
     return Attempt(
         index=index,
@@ -265,26 +317,53 @@ def _record_attempt(
         latency_ms=int((time.perf_counter() - started) * 1000),
         error_type=error_type,
         billable=billable,
+        failure_phase=failure_phase,
     )
 
 
+def _phase_of(failure: LLMGatewayError) -> FailurePhase:
+    """Classify structurally, so a consumer never has to parse a message."""
+    if isinstance(failure, SchemaValidationError):
+        return FailurePhase.SCHEMA_VALIDATION
+    if isinstance(failure, OutputError):
+        return FailurePhase.OUTPUT_PARSING
+    if isinstance(failure, ProviderTimeoutError):
+        return FailurePhase.TIMEOUT
+    return FailurePhase.PROVIDER
+
+
 def _request_for_model(request: LLMRequest, model: str) -> LLMRequest:
-    """Adapt reasoning before a model attempt so a fallback cannot receive an invalid option."""
-    effort = request.reasoning_effort
-    if effort is None:
-        return request
+    """Strip options the target model does not accept, before it is attempted.
 
+    A fallback inherits the request that was written for a *different* model,
+    and a provider rejects the whole call over one option it does not know.
+    Nothing raises here: the fallback stays visible in the execution, and only
+    the offending option is dropped.
+    """
     info = lookup_model(model)
-    if info is not None and effort in info.reasoning_efforts:
-        return request
+    changes: dict[str, Any] = {}
 
+    effort = _effort_for_model(request, info)
+    if effort != request.reasoning_effort:
+        changes["reasoning_effort"] = effort
+
+    # Silence in the catalogue is not evidence that an option is rejected, so
+    # only a model that declares the refusal loses its temperature.
+    if request.temperature is not None and info is not None and not info.supports_temperature:
+        changes["temperature"] = None
+
+    return replace(request, **changes) if changes else request
+
+
+def _effort_for_model(request: LLMRequest, info: ModelInfo | None) -> ReasoningEffort | None:
+    effort = request.reasoning_effort
+    if effort is None or (info is not None and effort in info.reasoning_efforts):
+        return effort
     if info is not None and "medium" in info.reasoning_efforts:
-        return replace(request, reasoning_effort="medium")
-
+        return "medium"
     # Unknown and non-thinking models must not receive a provider-specific
-    # reasoning field that the API may reject. The fallback still remains
-    # visible in execution; only this request option is removed.
-    return replace(request, reasoning_effort=None)
+    # reasoning field that the API may reject.
+    return None
 
 
 def _aggregate(attempts: list[Attempt]) -> tuple[TokenUsage, Cost]:

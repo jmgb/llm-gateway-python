@@ -75,6 +75,28 @@ class AttemptOutcome(Enum):
     FAILED = "failed"
 
 
+class FailurePhase(Enum):
+    """Where an attempt broke.
+
+    The exception class alone forces a reader to rebuild the context: a
+    rate limit and a malformed payload are both "an error", but only one of
+    them means the provider answered and was paid for it. Dashboards and
+    alerting want that distinction without importing the error hierarchy.
+    """
+
+    PROVIDER = "provider"
+    """The provider rejected the call or never answered."""
+
+    TIMEOUT = "timeout"
+    """The attempt ran out of its own time budget."""
+
+    OUTPUT_PARSING = "output_parsing"
+    """An answer arrived, but JSON could not be recovered from it."""
+
+    SCHEMA_VALIDATION = "schema_validation"
+    """JSON parsed, and did not satisfy the requested schema."""
+
+
 @dataclass(frozen=True, slots=True)
 class Attempt:
     """One call to one model. Recorded whether it succeeded or not."""
@@ -89,6 +111,8 @@ class Attempt:
     error_type: str | None = None
     billable: bool = True
     """False only when the call never reached the provider."""
+    failure_phase: FailurePhase | None = None
+    """``None`` on a successful attempt, and only then."""
 
 
 @dataclass(frozen=True, slots=True)

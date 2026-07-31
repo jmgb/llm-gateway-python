@@ -9,6 +9,62 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Output validation happens inside the attempt loop.** An answer that cannot
+  be parsed as JSON, or that does not satisfy the requested schema, was
+  previously validated *after* the attempt had already been accepted as the
+  result. Two things followed, both invisible from the result: the fallback
+  never ran, and the tokens that produced the rejected answer were left out of
+  `usage`, `cost`, `execution.attempts` and every sink.
+
+  Such an answer is now a failed **billable** attempt, recorded with the exact
+  usage and cost the provider reported, and the next model in the plan is
+  tried. The same model is not retried: the same prompt and the same model
+  reproduce the same malformed answer, so a retry would buy a second invoice
+  for one failure. `RetryPolicy` continues to govern provider failures.
+
+- **OpenAI structured output is normalised to the strict subset.** Pydantic's
+  schema was sent to the Responses API unchanged with `strict: true`, which
+  rejects it: a field with a default is omitted from `required`, and no object
+  declares `additionalProperties: false`. `providers/strict_schema.py` now
+  rewrites the schema recursively — root, `$defs`, nested objects and union
+  branches — leaving `$ref` intact. A construct strict mode cannot express,
+  such as a free-form `dict[str, str]`, raises `ConfigurationError` naming the
+  field instead of buying a provider 400 on every attempt.
+
+- **Request options are adapted to the target model, not only reasoning
+  effort.** A fallback onto a model of the OpenAI 5.6 family inherited the
+  caller's `temperature`, which that API rejects outright — turning the
+  fallback into a second, guaranteed failure. `ModelInfo.supports_temperature`
+  declares the refusal and the option is dropped before the attempt.
+
+### Changed
+
+- **A call that never produces a usable answer raises `AllAttemptsFailed`**,
+  carrying every attempt, with the `OutputParsingError` or
+  `SchemaValidationError` as its `__cause__`. It previously raised the output
+  error directly, which lost the attempts — and therefore the money spent.
+
+- `function_calling`, `inline_files` and `remote_files` are declared `False` on
+  every adapter. The providers support them; `LLMRequest` has no field that
+  asks for any of them, so the declaration promised a capability no caller
+  could exercise. `tests/contract/test_capability_honesty.py` is written
+  against `LLMRequest`, so the declarations may return the day the contract
+  grows the fields.
+
+### Added
+
+- `Attempt.failure_phase`, a typed `FailurePhase` — `provider`, `timeout`,
+  `output_parsing` or `schema_validation`. `error_type` alone forced a consumer
+  to rebuild the context from a class name to tell "the provider refused" from
+  "the provider answered, was paid, and the answer was unusable".
+
+- `tests/contract/test_structured_fallback.py`: every adapter is driven through
+  the gateway with a fake client and held to the same behaviour — invalid JSON,
+  a schema violation, a successful fallback, total exhaustion, and the exact
+  sum of tokens and cost across attempts.
+
 ## [0.6.0] — 2026-07-31
 
 ### Changed

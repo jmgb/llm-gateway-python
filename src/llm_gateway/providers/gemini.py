@@ -22,9 +22,12 @@ from llm_gateway.usage import TokenUsage
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=True,
     json_mode=True,
-    function_calling=True,
-    inline_files=True,
-    remote_files=True,
+    # Gemini serves all three; the neutral request cannot express any of them
+    # yet, and a capability no caller can reach is a promise that answers
+    # nothing. See tests/contract/test_capability_honesty.py.
+    function_calling=False,
+    inline_files=False,
+    remote_files=False,
     reasoning_effort=True,
     conversation_history=True,
     reports_token_usage=True,

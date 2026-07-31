@@ -74,6 +74,13 @@ produced tokens is not free.
 When a failed attempt's cost is unknown, the total degrades to `ESTIMATED`
 rather than silently ignoring it.
 
+An answer that arrived but could not be used — unparseable JSON, or a payload
+that violates the schema — is billed like any other answer, with the exact
+usage the provider reported. The model did the work and the invoice will say
+so; the only thing that failed is the caller's ability to use the result. Those
+attempts appear in `execution.attempts` with `billable=True` and a
+`failure_phase` of `output_parsing` or `schema_validation`.
+
 ## Versioning
 
 `CATALOG_VERSION` identifies the table that produced an amount, and travels

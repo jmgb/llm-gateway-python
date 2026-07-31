@@ -75,6 +75,12 @@ class ModelInfo:
     notes: str = ""
     aliases: tuple[str, ...] = field(default=())
     reasoning_efforts: tuple[ReasoningEffort, ...] = field(default=())
+    supports_temperature: bool = True
+    """False for models whose API rejects the option outright.
+
+    Declared rather than inferred, and defaulting to the permissive answer:
+    an entry that says nothing keeps sending what the caller asked for.
+    """
 
     @property
     def rate(self) -> ModelRate:
@@ -94,6 +100,7 @@ def _m(
     deprecated: bool = False,
     notes: str = "",
     reasoning_efforts: tuple[ReasoningEffort, ...] = (),
+    supports_temperature: bool = True,
 ) -> ModelInfo:
     return ModelInfo(
         id=model_id,
@@ -103,6 +110,7 @@ def _m(
         deprecated=deprecated,
         notes=notes,
         reasoning_efforts=reasoning_efforts,
+        supports_temperature=supports_temperature,
     )
 
 
@@ -110,12 +118,15 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # ---- OpenAI ---------------------------------------------------------
     _m("gpt-5.1-2025-11-13", "openai", "1.25", "10.00"),
     _m("gpt-5.2-2025-12-11", "openai", "1.75", "14.00"),
+    # The 5.6 family rejects `temperature`: reasoning replaces it, and sending
+    # it fails the whole call. A fallback onto one of these must not inherit it.
     _m(
         "gpt-5.6-sol",
         "openai",
         "5.00",
         "30.00",
         reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        supports_temperature=False,
     ),
     _m(
         "gpt-5.6-terra",
@@ -124,6 +135,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "12.00",
         notes="max output 128K tokens",
         reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        supports_temperature=False,
     ),
     _m(
         "gpt-5.6-luna",
@@ -131,6 +143,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "0.20",
         "1.20",
         reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        supports_temperature=False,
     ),
     _m("gpt-realtime-2025-08-28", "openai", "32.00", "64.00", notes="realtime audio"),
     _m("gpt-realtime-mini-2025-10-06", "openai", "10.00", "20.00", notes="realtime audio"),

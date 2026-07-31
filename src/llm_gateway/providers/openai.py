@@ -18,14 +18,18 @@ from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
+from llm_gateway.providers.strict_schema import strict_json_schema
 from llm_gateway.usage import TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=True,
     json_mode=True,
-    function_calling=True,
-    inline_files=True,
-    remote_files=True,
+    # The provider does all three; this package's request contract has no way
+    # to ask for any of them, and a capability a caller cannot exercise reads
+    # as available while answering nothing. Declared when the contract grows.
+    function_calling=False,
+    inline_files=False,
+    remote_files=False,
     reasoning_effort=True,
     conversation_history=True,
     reports_token_usage=True,
@@ -73,7 +77,9 @@ class OpenAIAdapter:
                 "format": {
                     "type": "json_schema",
                     "name": schema.__name__,
-                    "schema": schema.model_json_schema(),
+                    # Pydantic's schema is not the subset strict mode accepts;
+                    # sending it unchanged is a 400 on every structured call.
+                    "schema": strict_json_schema(schema),
                     "strict": True,
                 }
             }

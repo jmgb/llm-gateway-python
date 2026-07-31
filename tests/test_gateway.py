@@ -7,19 +7,23 @@ bookkeeping is exactly what must be provable without a network.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
 from llm_gateway import (
     AllAttemptsFailed,
+    AttemptOutcome,
     AuthenticationError,
     CostMeasurement,
+    FailurePhase,
     FallbackPolicy,
     LLMGateway,
     LLMRequest,
     Message,
     ModelRate,
+    OutputParsingError,
     ProviderRegistry,
     ProviderResponse,
     RateLimitedError,
@@ -213,16 +217,20 @@ class TestStructuredOutput:
         assert not hasattr(result.output, "tokens_in")
         assert result.usage.input_tokens == 10
 
-    async def test_a_payload_that_violates_the_schema_raises(self) -> None:
+    async def test_a_payload_that_violates_the_schema_exhausts_the_call(self) -> None:
         adapter = FakeAdapter(_ok('{"otra_cosa": 1}'))
 
-        with pytest.raises(SchemaValidationError):
+        with pytest.raises(AllAttemptsFailed) as caught:
             await _gateway(adapter).generate(
                 _request(
                     response_format=ResponseFormat.JSON_SCHEMA,
                     response_schema=TestStructuredOutput.Answer,
                 )
             )
+
+        assert isinstance(caught.value.__cause__, SchemaValidationError), (
+            "the exhausted call must still say why the output was unusable"
+        )
 
     async def test_json_object_output_is_returned_as_a_dict(self) -> None:
         adapter = FakeAdapter(_ok('{"a": 1}'))
@@ -320,6 +328,175 @@ class TestReasoningEffortRouting:
         await gateway.generate(_request(model="gpt-5.6-terra", reasoning_effort="max"))
 
         assert adapter.calls == ["gpt-5.6-terra"]
+
+
+class TestUnusableOutput:
+    """An attempt that answers with unusable output is a *failed billable* attempt.
+
+    The provider produced tokens, so the money was spent; what came back cannot
+    be given to the caller. Both facts have to survive into the accounting.
+    """
+
+    class Answer(BaseModel):
+        veredicto: str
+
+    def _schema_request(self, **kwargs: Any) -> LLMRequest:
+        return _request(
+            response_format=ResponseFormat.JSON_SCHEMA,
+            response_schema=TestUnusableOutput.Answer,
+            **kwargs,
+        )
+
+    async def test_unparseable_json_falls_back_to_the_next_model(self) -> None:
+        adapter = FakeAdapter(_ok("not json at all"), _ok('{"veredicto": "ok"}'))
+
+        result = await _gateway(adapter).generate(
+            self._schema_request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+        )
+
+        assert result.output.veredicto == "ok"
+        assert adapter.calls == ["fast", "slow"]
+
+    async def test_a_schema_violation_falls_back_to_the_next_model(self) -> None:
+        adapter = FakeAdapter(_ok('{"otra_cosa": 1}'), _ok('{"veredicto": "ok"}'))
+
+        result = await _gateway(adapter).generate(
+            self._schema_request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+        )
+
+        assert result.execution.fallback_used is True
+        assert result.execution.model_used == "slow"
+
+    async def test_the_unusable_attempt_is_billed_with_the_tokens_it_spent(self) -> None:
+        adapter = FakeAdapter(_ok("not json at all"), _ok('{"veredicto": "ok"}'))
+
+        result = await _gateway(adapter).generate(
+            self._schema_request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+        )
+
+        rejected = result.execution.attempts[0]
+        assert rejected.outcome is AttemptOutcome.FAILED
+        assert rejected.billable is True
+        assert rejected.usage.input_tokens == 10
+        assert rejected.cost.microusd == 20
+        assert result.usage.input_tokens == 20, "both attempts consumed input tokens"
+        assert result.cost.microusd == 40, "a rejected answer is still on the invoice"
+
+    async def test_the_failure_phase_distinguishes_parsing_from_schema_violation(self) -> None:
+        parsing = FakeAdapter(_ok("not json at all"), _ok('{"veredicto": "ok"}'))
+        schema = FakeAdapter(_ok('{"otra_cosa": 1}'), _ok('{"veredicto": "ok"}'))
+        request = self._schema_request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+
+        from_parsing = await _gateway(parsing).generate(request)
+        from_schema = await _gateway(schema).generate(request)
+
+        assert from_parsing.execution.attempts[0].failure_phase is FailurePhase.OUTPUT_PARSING
+        assert from_parsing.execution.attempts[0].error_type == "OutputParsingError"
+        assert from_schema.execution.attempts[0].failure_phase is FailurePhase.SCHEMA_VALIDATION
+
+    async def test_unusable_output_is_not_retried_on_the_same_model(self) -> None:
+        """The same prompt on the same model reproduces the same malformed answer."""
+        adapter = FakeAdapter(_ok("not json"), _ok('{"veredicto": "ok"}'))
+
+        with pytest.raises(AllAttemptsFailed):
+            await _gateway(adapter).generate(
+                self._schema_request(
+                    retry_policy=RetryPolicy(max_attempts=3, retry_transient_only=False)
+                )
+            )
+
+        assert adapter.calls == ["fast"]
+
+    async def test_exhausting_every_model_reports_each_unusable_attempt(self) -> None:
+        adapter = FakeAdapter(_ok("not json"), _ok('{"otra_cosa": 1}'))
+
+        with pytest.raises(AllAttemptsFailed) as caught:
+            await _gateway(adapter).generate(
+                self._schema_request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+            )
+
+        attempts = caught.value.attempts
+        assert [a.failure_phase for a in attempts] == [
+            FailurePhase.OUTPUT_PARSING,
+            FailurePhase.SCHEMA_VALIDATION,
+        ]
+        assert all(a.billable for a in attempts)
+        assert isinstance(caught.value.__cause__, SchemaValidationError)
+
+    async def test_a_json_object_request_is_held_to_the_same_rule(self) -> None:
+        adapter = FakeAdapter(_ok("prose, not json"), _ok('{"a": 1}'))
+
+        result = await _gateway(adapter).generate(
+            _request(
+                response_format=ResponseFormat.JSON_OBJECT,
+                fallback_policy=FallbackPolicy.models_in_order("slow"),
+            )
+        )
+
+        assert result.output == {"a": 1}
+        assert result.execution.attempts[0].error_type == OutputParsingError.__name__
+
+    async def test_a_provider_failure_is_labelled_as_such(self) -> None:
+        adapter = FakeAdapter(RateLimitedError("429"), _ok("ok"))
+
+        result = await _gateway(adapter).generate(
+            _request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+        )
+
+        assert result.execution.attempts[0].failure_phase is FailurePhase.PROVIDER
+
+
+class TestRequestNormalisation:
+    """Every attempt sends only options the target model accepts."""
+
+    def _openai_gateway(self, adapter: FakeAdapter) -> LLMGateway:
+        adapter.name = "openai"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("gpt-",))
+        return LLMGateway(registry=registry)
+
+    async def test_temperature_is_dropped_for_a_model_that_rejects_it(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+
+        await self._openai_gateway(adapter).generate(
+            _request(model="gpt-5.6-luna", temperature=0.2)
+        )
+
+        assert adapter.requests[0].temperature is None
+
+    async def test_temperature_survives_for_a_model_that_accepts_it(self) -> None:
+        adapter = FakeAdapter(_ok("x"))
+
+        await self._openai_gateway(adapter).generate(
+            _request(model="gpt-5.2-2025-12-11", temperature=0.2)
+        )
+
+        assert adapter.requests[0].temperature == 0.2
+
+    async def test_a_fallback_does_not_inherit_a_temperature_its_model_rejects(self) -> None:
+        adapter = FakeAdapter(RateLimitedError("429"), _ok("from the fallback"))
+
+        result = await self._openai_gateway(adapter).generate(
+            _request(
+                model="gpt-5.2-2025-12-11",
+                temperature=0.2,
+                fallback_policy=FallbackPolicy.models_in_order("gpt-5.6-terra"),
+            )
+        )
+
+        assert result.output == "from the fallback"
+        assert adapter.requests[0].temperature == 0.2
+        assert adapter.requests[1].temperature is None
+
+    async def test_an_uncatalogued_model_keeps_the_temperature_it_was_given(self) -> None:
+        """Silence in the catalogue is not evidence that an option is rejected."""
+        adapter = FakeAdapter(_ok("x"))
+
+        await self._openai_gateway(adapter).generate(
+            _request(model="gpt-brand-new", temperature=0.2)
+        )
+
+        assert adapter.requests[0].temperature == 0.2
 
 
 class TestFailureAccounting:

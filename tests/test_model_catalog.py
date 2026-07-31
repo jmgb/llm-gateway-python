@@ -210,6 +210,23 @@ class TestCatalogueHygiene:
             info.input_usd_per_mtok = Decimal("0")  # type: ignore[misc]
 
 
+class TestDeclaredRequestOptions:
+    """What a model accepts is declared, never inferred from its id."""
+
+    def test_the_openai_56_family_declares_that_it_rejects_temperature(self) -> None:
+        for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.supports_temperature is False, model_id
+
+    def test_a_model_that_says_nothing_keeps_accepting_temperature(self) -> None:
+        """Silence is not evidence of a refusal; the permissive answer is the default."""
+        info = lookup_model("gpt-5.2-2025-12-11")
+
+        assert info is not None
+        assert info.supports_temperature is True
+
+
 class TestModelInfo:
     def test_a_rate_is_derived_from_the_declared_price(self) -> None:
         info = ModelInfo(

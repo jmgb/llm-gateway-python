@@ -21,6 +21,8 @@ Provider-shaped code moved here. Product-shaped code stayed in the application.
 | Retry, fallback, attempt accounting | `gateway.py` | Same logic for every provider; divergence is the bug |
 | Token and cost arithmetic | `usage.py`, `pricing.py` | Same maths everywhere; prices are injected |
 | JSON recovery | `json_payload.py` | A provider-shaped problem |
+| Deciding whether an answer is usable | `gateway.py` | It decides whether the attempt failed, so it cannot sit after the attempt |
+| Adapting a request to the target model | `gateway.py`, `models.py` | A fallback inherits a request written for another model |
 | Ledger, tenant, alerting, history | The application | Changes with the product |
 | Prompts, business schemas, model choice per feature | The application | Changes with the product |
 
@@ -70,6 +72,47 @@ Two things follow from "a failed call may still be billed":
 A retry that timed out after the provider had already produced tokens is not
 free, and reporting `USD 0` for it would under-declare spend precisely in the
 worst case.
+
+## Unusable output is a failed attempt, not a returned one
+
+An answer that cannot be parsed as JSON, or that does not satisfy the requested
+schema, is decided **inside** the attempt loop. Validating after the loop —
+which is what this package did until 0.7.0 — has two consequences that are hard
+to see and expensive to have:
+
+* the fallback never runs, because the attempt was already accepted as the
+  result;
+* the tokens that produced the rejected answer are outside the totals, so the
+  invoice is larger than the accounting.
+
+The policy is deliberately simple and stated here because nothing in the type
+system says it:
+
+| Failure | What happens |
+|---|---|
+| `OutputParsingError`, `SchemaValidationError` | The attempt is recorded as `FAILED`, **billable**, with the usage and cost the provider reported. The next model in the plan is tried |
+| Either of them on the last model | `AllAttemptsFailed`, with the output error as `__cause__` |
+
+The same model is **not** retried after unusable output: the same prompt and
+the same model reproduce the same malformed answer, so the retry buys a second
+invoice for one failure. `RetryPolicy` still governs provider failures.
+
+`Attempt.failure_phase` names which of the four phases ended an attempt —
+`provider`, `timeout`, `output_parsing`, `schema_validation` — so a dashboard
+does not have to rebuild that from an exception class name.
+
+## Requests are adapted per model, per attempt
+
+`_request_for_model` runs before every attempt and removes options the target
+model does not accept: a reasoning effort it does not declare, a `temperature`
+its API rejects outright. A fallback inherits a request that was written for a
+different model, and a provider refuses the whole call over one unknown option
+— which would turn the fallback into a second, guaranteed failure.
+
+Nothing raises: the fallback stays visible in `execution`, and only the
+offending option is dropped. What the model accepts is declared in the
+catalogue (`ModelInfo.reasoning_efforts`, `ModelInfo.supports_temperature`),
+never inferred from the id.
 
 ## Error classification without SDK imports
 

@@ -133,6 +133,12 @@ result.execution.fallback_used  # a fallback is never silent
 result.execution.attempts  # every attempt, including the failed ones
 ```
 
+If the model answers with something that is not valid JSON, or with JSON that
+violates `Answer`, that attempt is recorded as failed **and billed** — the
+tokens were spent — and the next model in `fallback_policy` is tried. When no
+model produces a usable answer the call raises `AllAttemptsFailed`, carrying
+every attempt, with the parsing or schema error as its `__cause__`.
+
 ## The guarantees
 
 These are enforced by tests, not by convention:
@@ -142,6 +148,9 @@ These are enforced by tests, not by convention:
 | Unreported usage is `None`, not `0` | A zero token count silently under-bills |
 | Unknown cost is `UNAVAILABLE`, not `USD 0` | "Free" and "unknown" are different facts |
 | Cost aggregates **every billable attempt** | A retry that failed may still be invoiced |
+| An unusable answer is a *billed, failed* attempt | Invalid JSON still cost money, and the fallback still gets a turn |
+| Each attempt carries a typed `failure_phase` | `provider`, `timeout`, `output_parsing` or `schema_validation`, without parsing a message |
+| Every attempt sends only options its model accepts | A fallback must not fail on a `temperature` the next model rejects |
 | Fallback is off by default and always visible | A silent model switch corrupts A/B comparisons and cost attribution |
 | Exhausted calls **raise** | They never return something that looks like a success |
 | Errors carry the attempts already made | A failure still accounts for the money it spent |
@@ -172,7 +181,17 @@ that application's local adapter.
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
 
-Reasoning effort is checked per model before each API attempt. OpenAI 5.6
+`function_calling`, `inline_files` and `remote_files` are declared `False` on
+every adapter, even where the provider supports them: this package's request
+contract has no way to ask for tools or attachments, so a `True` there would
+report a capability no caller can reach. They become `True` when the contract
+grows the fields, and a contract test keeps the two in step.
+
+Request options are adapted per model before each API attempt. A model that
+rejects `temperature` — the OpenAI 5.6 family — never receives it, including
+when it is reached through a fallback that inherited it from another model.
+
+Reasoning effort is checked the same way. OpenAI 5.6
 models support `none`, `low`, `medium`, `high`, `xhigh`, and `max`; Gemini 3
 Flash supports `minimal`, `low`, `medium`, and `high`; Gemini 3 Pro and Groq
 GPT-OSS support `low`, `medium`, and `high`. If a fallback cannot honour the

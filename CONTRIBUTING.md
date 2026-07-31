@@ -75,7 +75,9 @@ without the fix.
 ## Adding a provider
 
 1. A new module in `src/llm_gateway/providers/`, taking an **injected client**.
-2. Declare its real `ProviderCapabilities` — do not claim parity it lacks.
+2. Declare its real `ProviderCapabilities` — do not claim parity it lacks, and
+   do not claim what `LLMRequest` cannot ask for. A capability no caller can
+   reach reads as available and answers nothing; a contract test enforces it.
 3. Map errors through `classify_provider_error`; do not import the SDK to catch
    its exception types.
 4. Add the SDK as an **optional extra** in `pyproject.toml`.

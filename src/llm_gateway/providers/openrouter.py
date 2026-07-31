@@ -30,7 +30,8 @@ CAPABILITIES = ProviderCapabilities(
     # not apply is worse than one that was never claimed.
     structured_outputs=False,
     json_mode=True,
-    function_calling=True,
+    # No request field asks for tools, so declaring them promises nothing.
+    function_calling=False,
     inline_files=False,
     remote_files=False,
     reasoning_effort=False,

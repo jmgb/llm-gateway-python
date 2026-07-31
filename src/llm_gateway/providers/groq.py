@@ -16,7 +16,8 @@ from llm_gateway.usage import TokenUsage
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=False,
     json_mode=True,
-    function_calling=True,
+    # No request field asks for tools, so declaring them promises nothing.
+    function_calling=False,
     inline_files=False,
     remote_files=False,
     reasoning_effort=True,
