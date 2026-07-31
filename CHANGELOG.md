@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-31
+
 ### Fixed
 
 - **The sdist declares what it ships.** With no `[tool.hatch.build.targets.sdist]`
