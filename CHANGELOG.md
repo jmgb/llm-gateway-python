@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-31
+
 ### Fixed
 
 - **A requested schema now reaches providers that cannot enforce one.** The
