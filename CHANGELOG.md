@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-31
+
 ### Fixed
 
 - Release artifact selection now ignores signatures, partial downloads, files
