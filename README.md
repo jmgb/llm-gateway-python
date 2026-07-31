@@ -233,6 +233,31 @@ the reasoning on each.
 - [`docs/migration.md`](docs/migration.md) — adopting it behind an existing function
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — what belongs here, and the non-negotiables
 
+## Releasing without GitHub Actions
+
+The local release runner keeps versioning and publication independent from
+GitHub Actions minutes. Preview a release first:
+
+```bash
+uv run --offline python scripts/release.py --version 0.6.0 --dry-run
+```
+
+Prepare the release locally, including tests, the version in `pyproject.toml`
+and `uv.lock`, the changelog, a release commit, and an annotated tag:
+
+```bash
+uv run --offline python scripts/release.py --version 0.6.0
+```
+
+Add `--push` to push `main` and the tag. Add `--publish` as well to publish
+the matching wheel and sdist with `uv publish` and create the GitHub Release;
+the latter requires GitHub CLI authentication and `UV_PUBLISH_TOKEN`.
+`--publish` implies a real external release and therefore requires `--push`.
+
+The local runner is the normal publisher when Actions minutes are unavailable.
+The GitHub workflow is manual only; use one publisher per version to avoid
+uploading the same PyPI files twice.
+
 ## Development
 
 ```bash
