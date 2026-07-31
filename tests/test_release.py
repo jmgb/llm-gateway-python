@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -11,10 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.release_manifest import (
     bump_version,
+    local_env_values,
     promote_unreleased,
     replace_lock_version,
     replace_project_version,
+    unpublishable_members,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 PROJECT = """[project]
 name = "neutral-llm-gateway"
@@ -83,3 +88,95 @@ def test_promote_unreleased_creates_a_dated_release_section() -> None:
     assert "## [Unreleased]\n\n## [0.6.0] — 2026-07-31" in updated
     assert "- Add a release change." in updated
     assert "## [0.5.0] — 2026-07-30" in updated
+
+
+class TestNothingLocalIsPublishable:
+    """An upload cannot be taken back, so the audit runs before it, not after.
+
+    0.6.0 published an sdist containing the maintainer's `.env`, and with it a
+    PyPI token, because hatchling packages the project directory minus whatever
+    VCS ignored at build time — and the ignore rule was committed three minutes
+    after the build. Deleting the release would not have unpublished the file:
+    it was already mirrored. Only refusing to upload it would have.
+    """
+
+    def test_it_catches_the_file_that_actually_leaked(self) -> None:
+        members = [
+            "neutral_llm_gateway-0.6.0/.env",
+            "neutral_llm_gateway-0.6.0/src/llm_gateway/gateway.py",
+        ]
+
+        assert unpublishable_members(members) == ["neutral_llm_gateway-0.6.0/.env"]
+
+    def test_an_ordinary_sdist_has_nothing_to_report(self) -> None:
+        members = [
+            "neutral_llm_gateway-0.7.0/PKG-INFO",
+            "neutral_llm_gateway-0.7.0/pyproject.toml",
+            "neutral_llm_gateway-0.7.0/.python-version",
+            "neutral_llm_gateway-0.7.0/.gitignore",
+            "neutral_llm_gateway-0.7.0/src/llm_gateway/__init__.py",
+            "neutral_llm_gateway-0.7.0/tests/test_release.py",
+        ]
+
+        assert unpublishable_members(members) == []
+
+    def test_a_wheel_keeps_its_dist_info(self) -> None:
+        """`.dist-info` is metadata the wheel format requires, not a dotfile."""
+        members = [
+            "llm_gateway/__init__.py",
+            "neutral_llm_gateway-0.7.0.dist-info/METADATA",
+            "neutral_llm_gateway-0.7.0.dist-info/RECORD",
+        ]
+
+        assert unpublishable_members(members) == []
+
+    @pytest.mark.parametrize(
+        "name",
+        (
+            "pkg-1.0/.envrc",
+            "pkg-1.0/.pypirc",
+            "pkg-1.0/deploy/id_rsa",
+            "pkg-1.0/certs/server.pem",
+            "pkg-1.0/.git/config",
+            "pkg-1.0/.claude/settings.json",
+        ),
+    )
+    def test_it_refuses_the_next_one_too(self, name: str) -> None:
+        """Blunt on purpose: an unexpected dotfile is refused before anyone names it."""
+        assert unpublishable_members([name]) == [name]
+
+
+class TestTheLocalEnvIsReadNotEvaluated:
+    """A `.env` may hold the publishing token, so parsing it must be boring."""
+
+    def test_it_reads_a_plain_assignment(self) -> None:
+        assert local_env_values("UV_PUBLISH_TOKEN=abc\n") == {"UV_PUBLISH_TOKEN": "abc"}
+
+    def test_it_tolerates_comments_blanks_and_export(self) -> None:
+        text = "# a comment\n\nexport UV_PUBLISH_TOKEN=abc\nGH_TOKEN='xyz'\n"
+
+        assert local_env_values(text) == {"UV_PUBLISH_TOKEN": "abc", "GH_TOKEN": "xyz"}
+
+    def test_a_value_containing_equals_is_kept_whole(self) -> None:
+        """Base64 and JWT-shaped tokens end in `=`; splitting again truncates them."""
+        assert local_env_values("T=a=b==")["T"] == "a=b=="
+
+    def test_a_line_without_an_assignment_is_ignored_not_guessed(self) -> None:
+        assert local_env_values("just some prose\n") == {}
+
+
+class TestTheSdistDeclaresWhatItShips:
+    def test_the_sdist_target_lists_its_contents_explicitly(self) -> None:
+        """Without this list hatchling falls back to "everything VCS did not ignore".
+
+        That default is what shipped a `.env`, and it fails silently: the
+        artifact builds, uploads and installs perfectly well.
+        """
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        include = config["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+
+        assert include, "the sdist must declare an explicit include list"
+        assert "/src" in include
+        assert all(entry.startswith("/") for entry in include), (
+            "unanchored patterns match at any depth, which is how a stray file gets in"
+        )

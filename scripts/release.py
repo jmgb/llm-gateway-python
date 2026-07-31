@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as date
+import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Sequence
+import tarfile
+import zipfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 if not __package__:
@@ -16,10 +19,12 @@ if not __package__:
 
 from scripts.release_manifest import (
     bump_version,
+    local_env_values,
     project_version,
     promote_unreleased,
     replace_lock_version,
     replace_project_version,
+    unpublishable_members,
     unreleased_body,
     version_parts,
 )
@@ -28,9 +33,14 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT_FILE = ROOT / "pyproject.toml"
 LOCK_FILE = ROOT / "uv.lock"
 CHANGELOG_FILE = ROOT / "CHANGELOG.md"
+ENV_FILE = ROOT / ".env"
 
 
-def _run(command: Sequence[str], *, capture: bool = False) -> str:
+def _run(
+    command: Sequence[str], *, capture: bool = False, env: Mapping[str, str] | None = None
+) -> str:
+    # The command line is printed, so no credential may ever travel in one:
+    # `uv publish` and `gh` both read theirs from the environment.
     print(f"$ {shlex.join(command)}")
     result = subprocess.run(
         command,
@@ -38,8 +48,25 @@ def _run(command: Sequence[str], *, capture: bool = False) -> str:
         check=True,
         capture_output=capture,
         text=True,
+        env=None if env is None else dict(env),
     )
     return result.stdout.strip() if capture else ""
+
+
+def _publishing_environment() -> dict[str, str]:
+    """The environment for the upload, with a local ``.env`` as a fallback.
+
+    ``.env`` is a reasonable place for a publishing token *because* it can no
+    longer travel: it is absent from the sdist allowlist and the artifact audit
+    refuses any archive containing one. Without reading it here the token has
+    to be exported by hand before every release, and the shortcut people reach
+    for instead is committing it. An already-exported value still wins.
+    """
+    environment = dict(os.environ)
+    if ENV_FILE.exists():
+        for key, value in local_env_values(ENV_FILE.read_text(encoding="utf-8")).items():
+            environment.setdefault(key, value)
+    return environment
 
 
 def _ensure_ready() -> None:
@@ -60,6 +87,39 @@ def _checks() -> None:
     )
     for command in commands:
         _run(command)
+
+
+def _artifacts_for(version: str) -> list[Path]:
+    return sorted((ROOT / "dist").glob(f"*{version}*"))
+
+
+def _archive_members(path: Path) -> list[str]:
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as archive:
+            return archive.namelist()
+    with tarfile.open(path) as archive:
+        return archive.getnames()
+
+
+def _audit_artifacts(version: str) -> None:
+    """Refuse to release an artifact carrying something that must stay local.
+
+    An upload is irreversible in the only sense that matters: the file is
+    mirrored and cached within minutes, so deleting the release does not
+    unpublish what was inside it. The one moment this can still be stopped is
+    here, between the build and the upload.
+    """
+    artifacts = _artifacts_for(version)
+    if not artifacts:
+        raise RuntimeError(f"no build artifacts found for {version}")
+    for path in artifacts:
+        offenders = unpublishable_members(_archive_members(path))
+        if offenders:
+            raise RuntimeError(
+                f"{path.name} would publish {offenders}; "
+                f"remove them from the sdist include list before releasing"
+            )
+        print(f"  audited {path.name}: {len(_archive_members(path))} files, nothing local")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -112,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         path.write_text(content)
     try:
         _checks()
+        _audit_artifacts(target)
     except Exception:
         for path, content in originals.items():
             path.write_text(content)
@@ -124,12 +185,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.push:
         _run(("git", "push", "origin", "HEAD", "--follow-tags"))
     if args.publish:
-        artifacts = sorted(
-            str(path.relative_to(ROOT)) for path in (ROOT / "dist").glob(f"*{target}*")
-        )
-        if not artifacts:
-            raise RuntimeError(f"no build artifacts found for {target}")
-        _run(("uv", "publish", *artifacts))
+        # Audited again against the files about to be uploaded: the earlier
+        # pass ran before the release commit, and dist/ is not immutable.
+        _audit_artifacts(target)
+        artifacts = [str(path.relative_to(ROOT)) for path in _artifacts_for(target)]
+        environment = _publishing_environment()
+        _run(("uv", "publish", *artifacts), env=environment)
         _run(
             (
                 "gh",
@@ -141,7 +202,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 tag,
                 "--notes",
                 release_notes,
-            )
+            ),
+            env=environment,
         )
     return 0
 

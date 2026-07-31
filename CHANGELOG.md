@@ -11,6 +11,18 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Fixed
 
+- **The sdist declares what it ships.** With no `[tool.hatch.build.targets.sdist]`
+  section, hatchling packages the whole project directory minus whatever the
+  VCS ignored *at build time*, so files that were never part of the
+  distribution — CI workflows, a local environment file — travelled to PyPI in
+  the 0.6.0 sdist. Packaging is now an explicit allowlist, and the wheel is
+  unaffected.
+
+  The local release runner audits every built artifact before uploading it and
+  refuses to publish one containing an unexpected dotfile or a credential-shaped
+  name. An upload cannot be undone: the file is mirrored within minutes, so the
+  only moment this can be stopped is between the build and the upload.
+
 - **Output validation happens inside the attempt loop.** An answer that cannot
   be parsed as JSON, or that does not satisfy the requested schema, was
   previously validated *after* the attempt had already been accepted as the

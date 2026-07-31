@@ -273,6 +273,12 @@ the matching wheel and sdist with `uv publish` and create the GitHub Release;
 the latter requires GitHub CLI authentication and `UV_PUBLISH_TOKEN`.
 `--publish` implies a real external release and therefore requires `--push`.
 
+Every built artifact is audited before it is uploaded, and the release is
+refused if the archive contains an unexpected dotfile or a credential-shaped
+name. What reaches a package index cannot be recalled — the file is mirrored
+within minutes — so the check runs between the build and the upload, which is
+the last moment it is still worth anything.
+
 The local runner is the normal publisher when Actions minutes are unavailable.
 The GitHub workflow is manual only; use one publisher per version to avoid
 uploading the same PyPI files twice.

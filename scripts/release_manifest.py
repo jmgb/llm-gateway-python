@@ -3,9 +3,75 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from pathlib import PurePosixPath
 
 PROJECT_NAME = "neutral-llm-gateway"
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+# Names that carry a credential often enough that publishing one is never a
+# deliberate act. `.env` is first for a reason: 0.6.0's sdist contained one.
+SECRET_FILE_NAMES = frozenset(
+    {".env", ".envrc", ".pypirc", ".netrc", ".npmrc", "id_rsa", "id_ed25519", "credentials"}
+)
+SECRET_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+# The only dotfiles the distribution is meant to carry. `.gitignore` is not on
+# the include list and lands in the sdist anyway: hatchling adds it so the
+# unpacked tree rebuilds identically. Naming it here is the difference between
+# a guard that passes and a guard that blocks every release until disabled.
+PUBLISHABLE_DOTFILES = frozenset({".python-version", ".gitignore"})
+
+
+def local_env_values(text: str) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` lines from a local ``.env``.
+
+    Publishing credentials live in a file the distribution never carries: it is
+    absent from the sdist allowlist, and ``unpublishable_members`` refuses any
+    artifact containing one. Reading it here is what makes that arrangement
+    usable — otherwise the token has to be exported by hand before every
+    release, and the shortcut people take instead is to commit it.
+
+    Deliberately small: no interpolation, no multi-line values, no shell
+    semantics. A parser that evaluates its input is a second way to lose a
+    credential.
+    """
+    values: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip().removeprefix("export ").strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def unpublishable_members(names: Iterable[str]) -> list[str]:
+    """Paths in a built artifact that must never reach a package index.
+
+    Applied to the archive before ``uv publish``, because an upload cannot be
+    taken back: the file stays on mirrors and in caches long after the index
+    entry is deleted, which is why a leaked credential has to be rotated rather
+    than unpublished. The rule is deliberately blunt — every dotfile that is
+    not explicitly expected is refused, so the *next* secret-bearing filename
+    is caught without anyone having thought of it first.
+    """
+    offenders = set()
+    for name in names:
+        for part in PurePosixPath(name).parts:
+            lowered = part.lower()
+            if lowered in SECRET_FILE_NAMES or lowered.endswith(SECRET_FILE_SUFFIXES):
+                offenders.add(name)
+                break
+            if part.startswith(".") and part not in PUBLISHABLE_DOTFILES:
+                offenders.add(name)
+                break
+    return sorted(offenders)
 
 
 def version_parts(version: str) -> tuple[int, int, int]:

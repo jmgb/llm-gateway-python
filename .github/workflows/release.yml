@@ -32,5 +32,13 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
+      # Between the build and the upload is the last moment this can be
+      # stopped: a published file is mirrored within minutes, and deleting the
+      # release does not unpublish what was inside it.
+      # Plain python3 on purpose: the audit is stdlib-only, and a guard that
+      # depends on a resolver is a guard that can be skipped by a resolver.
+      - name: Refuse to publish anything local
+        run: python3 scripts/audit_dist.py
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
