@@ -177,11 +177,18 @@ that application's local adapter.
 |---|---|---|
 | OpenAI | `[openai]` | Responses API |
 | Google Gemini | `[gemini]` | `google-genai` async surface, not the retired `google-generativeai` |
-| Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the gateway validates after |
+| Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the schema is described in the messages and the gateway validates after |
 | OpenRouter | `[openrouter]` | Chat Completions. Aggregator: declares the floor every route honours, not the best case |
 
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
+
+A provider that declares `structured_outputs=False` has no API field that binds
+the answer to a shape, so its adapter states the requested schema in the
+conversation instead of dropping it. Otherwise the model answers valid JSON
+under keys of its own choosing, validation rejects it, the attempt is billed
+anyway and the fallback serves every structured call — a result that looks
+correct and shows up only on the invoice.
 
 `function_calling`, `inline_files` and `remote_files` are declared `False` on
 every adapter, even where the provider supports them: this package's request

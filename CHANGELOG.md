@@ -9,6 +9,31 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A requested schema now reaches providers that cannot enforce one.** The
+  Groq and OpenRouter adapters declare `structured_outputs=False` and asked for
+  `{"type": "json_object"}`, which discarded the caller's `response_schema`
+  entirely. The model was told to answer JSON and never told which JSON, so it
+  answered valid JSON under keys of its own invention, the gateway correctly
+  rejected it, and the attempt was billed. Every structured call was therefore
+  served by the fallback, at the fallback's price, plus the discarded attempt.
+
+  Nothing about this looked like a failure — the caller received a correct
+  result and a fallback notice — so it was visible on the invoice and nowhere
+  else. Two applications hit it against Groq's `openai/gpt-oss-120b`.
+
+  Both adapters now state the schema in the messages. This also satisfies
+  Groq's requirement that the word "json" appear in the messages before it
+  accepts `json_object`, which an adapter asking for JSON mode owns rather than
+  leaving to the caller's prompt. `ResponseFormat.JSON_OBJECT` is unchanged: it
+  requests no particular shape, so none is described.
+
+  This changes cost accounting for anyone calling those providers with a
+  schema: the fallback stops running on every call, so the model that answers,
+  the amount billed and the attempt count all change — to what they should have
+  been.
+
 ## [0.8.0] — 2026-07-31
 
 ### Fixed

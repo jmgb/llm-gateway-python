@@ -11,6 +11,7 @@ from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
+from llm_gateway.providers.schema_prompt import schema_instruction
 from llm_gateway.usage import TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
@@ -65,9 +66,20 @@ class GroqAdapter:
         )
 
     def _build_messages(self, request: LLMRequest) -> list[dict[str, str]]:
+        """Carry the requested schema in the conversation.
+
+        Groq enforces no schema, so a structured call that does not describe
+        one leaves the model to invent its field names — a valid-JSON answer
+        that fails validation, is billed, and hands the call to the fallback.
+        """
         messages: list[dict[str, str]] = []
-        if request.system_prompt:
-            messages.append({"role": "system", "content": request.system_prompt})
+        system_prompt = request.system_prompt
+        if request.response_format is ResponseFormat.JSON_SCHEMA:
+            assert request.response_schema is not None  # guaranteed by LLMRequest
+            instruction = schema_instruction(request.response_schema)
+            system_prompt = f"{system_prompt}\n\n{instruction}" if system_prompt else instruction
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         messages.extend({"role": m.role, "content": m.content} for m in request.messages)
         return messages
 
