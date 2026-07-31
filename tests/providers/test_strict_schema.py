@@ -69,6 +69,25 @@ def test_references_are_left_intact() -> None:
     assert any("$ref" in branch for branch in schema["properties"]["reference"]["anyOf"])
 
 
+def test_a_reference_with_sibling_metadata_is_expanded_and_keeps_the_metadata() -> None:
+    class DescribedInvoice(BaseModel):
+        line: Line = Field(description="The billed line")
+
+    schema = strict_json_schema(DescribedInvoice)
+    line = schema["properties"]["line"]
+
+    assert "$ref" not in line
+    assert line["description"] == "The billed line"
+    assert line["type"] == "object"
+    assert line["additionalProperties"] is False
+
+
+def test_a_nullable_default_is_removed_from_the_provider_schema() -> None:
+    schema = strict_json_schema(Invoice)
+
+    assert "default" not in schema["properties"]["note"]
+
+
 def test_an_object_inside_a_union_branch_is_normalised() -> None:
     class Wrapper(BaseModel):
         payload: Line | str

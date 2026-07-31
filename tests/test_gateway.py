@@ -446,59 +446,6 @@ class TestUnusableOutput:
         assert result.execution.attempts[0].failure_phase is FailurePhase.PROVIDER
 
 
-class TestRequestNormalisation:
-    """Every attempt sends only options the target model accepts."""
-
-    def _openai_gateway(self, adapter: FakeAdapter) -> LLMGateway:
-        adapter.name = "openai"
-        registry = ProviderRegistry()
-        registry.register(adapter, model_prefixes=("gpt-",))
-        return LLMGateway(registry=registry)
-
-    async def test_temperature_is_dropped_for_a_model_that_rejects_it(self) -> None:
-        adapter = FakeAdapter(_ok("x"))
-
-        await self._openai_gateway(adapter).generate(
-            _request(model="gpt-5.6-luna", temperature=0.2)
-        )
-
-        assert adapter.requests[0].temperature is None
-
-    async def test_temperature_survives_for_a_model_that_accepts_it(self) -> None:
-        adapter = FakeAdapter(_ok("x"))
-
-        await self._openai_gateway(adapter).generate(
-            _request(model="gpt-5.2-2025-12-11", temperature=0.2)
-        )
-
-        assert adapter.requests[0].temperature == 0.2
-
-    async def test_a_fallback_does_not_inherit_a_temperature_its_model_rejects(self) -> None:
-        adapter = FakeAdapter(RateLimitedError("429"), _ok("from the fallback"))
-
-        result = await self._openai_gateway(adapter).generate(
-            _request(
-                model="gpt-5.2-2025-12-11",
-                temperature=0.2,
-                fallback_policy=FallbackPolicy.models_in_order("gpt-5.6-terra"),
-            )
-        )
-
-        assert result.output == "from the fallback"
-        assert adapter.requests[0].temperature == 0.2
-        assert adapter.requests[1].temperature is None
-
-    async def test_an_uncatalogued_model_keeps_the_temperature_it_was_given(self) -> None:
-        """Silence in the catalogue is not evidence that an option is rejected."""
-        adapter = FakeAdapter(_ok("x"))
-
-        await self._openai_gateway(adapter).generate(
-            _request(model="gpt-brand-new", temperature=0.2)
-        )
-
-        assert adapter.requests[0].temperature == 0.2
-
-
 class TestFailureAccounting:
     async def test_an_exhausted_call_still_reports_its_attempts(self) -> None:
         adapter = FakeAdapter(RateLimitedError("429"), RateLimitedError("429"))

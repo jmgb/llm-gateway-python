@@ -97,9 +97,11 @@ The same model is **not** retried after unusable output: the same prompt and
 the same model reproduce the same malformed answer, so the retry buys a second
 invoice for one failure. `RetryPolicy` still governs provider failures.
 
-`Attempt.failure_phase` names which of the four phases ended an attempt —
-`provider`, `timeout`, `output_parsing`, `schema_validation` — so a dashboard
-does not have to rebuild that from an exception class name.
+`Attempt.failure_phase` names which of the five phases ended an attempt —
+`configuration`, `provider`, `timeout`, `output_parsing`,
+`schema_validation` — so a dashboard does not have to rebuild that from an
+exception class name. A configuration failure is non-billable because the
+request never reached the provider.
 
 ## Requests are adapted per model, per attempt
 

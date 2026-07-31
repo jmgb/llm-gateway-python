@@ -5,10 +5,12 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import BaseModel
 
 from llm_gateway import (
     AllAttemptsFailed,
     CostMeasurement,
+    FallbackPolicy,
     LLMGateway,
     LLMRequest,
     Message,
@@ -16,6 +18,7 @@ from llm_gateway import (
     ProviderRegistry,
     ProviderResponse,
     RateLimitedError,
+    ResponseFormat,
     StaticPriceCatalog,
     TokenUsage,
     UsageRecord,
@@ -24,7 +27,17 @@ from llm_gateway.errors import OutputParsingError
 from llm_gateway.json_payload import parse_json_payload
 
 SECRET_PROMPT = "SENSITIVE-PROMPT-CANARY-DO-NOT-LEAK"
-CATALOG = StaticPriceCatalog(version="v1", rates={"m": ModelRate(Decimal("1"), Decimal("1"))})
+CATALOG = StaticPriceCatalog(
+    version="v1",
+    rates={
+        "m": ModelRate(Decimal("1"), Decimal("1")),
+        "fallback": ModelRate(Decimal("1"), Decimal("1")),
+    },
+)
+
+
+class StructuredAnswer(BaseModel):
+    answer: str
 
 
 class CollectingSinks:
@@ -67,7 +80,7 @@ def _ok() -> ProviderResponse:
 
 def _build(adapter: StubAdapter, sinks: CollectingSinks) -> LLMGateway:
     registry = ProviderRegistry()
-    registry.register(adapter, model_prefixes=("m",))
+    registry.register(adapter, model_prefixes=("m", "fallback"))
     return LLMGateway(
         registry=registry,
         price_catalog=CATALOG,
@@ -126,6 +139,58 @@ class TestSinksSeeWhatIsNeededToReconcile:
 
         assert sinks.usage[0].succeeded is False
         assert sinks.usage[0].cost.measurement is CostMeasurement.UNAVAILABLE
+
+    async def test_an_unusable_answer_and_its_fallback_reach_every_sink(self) -> None:
+        sinks = CollectingSinks()
+        invalid = ProviderResponse(
+            output_text="not json",
+            usage=TokenUsage(input_tokens=10, output_tokens=5),
+            finish_reason="stop",
+        )
+        valid = ProviderResponse(
+            output_text='{"answer":"ok"}',
+            usage=TokenUsage(input_tokens=10, output_tokens=5),
+            finish_reason="stop",
+        )
+
+        await _build(StubAdapter(invalid, valid), sinks).generate(
+            _request(
+                response_format=ResponseFormat.JSON_SCHEMA,
+                response_schema=StructuredAnswer,
+                fallback_policy=FallbackPolicy.models_in_order("fallback"),
+            )
+        )
+
+        record = sinks.usage[0]
+        assert record.succeeded is True
+        assert record.attempts == 2
+        assert record.cost.microusd == 30
+        assert sinks.events[0][0] == "llm_call_succeeded"
+        assert sinks.alerts[0][0] == "llm_fallback_used"
+
+    async def test_exhausted_unusable_answers_reach_the_failure_sinks_with_full_cost(self) -> None:
+        sinks = CollectingSinks()
+        invalid = ProviderResponse(
+            output_text="not json",
+            usage=TokenUsage(input_tokens=10, output_tokens=5),
+            finish_reason="stop",
+        )
+
+        with pytest.raises(AllAttemptsFailed):
+            await _build(StubAdapter(invalid, invalid), sinks).generate(
+                _request(
+                    response_format=ResponseFormat.JSON_SCHEMA,
+                    response_schema=StructuredAnswer,
+                    fallback_policy=FallbackPolicy.models_in_order("fallback"),
+                )
+            )
+
+        record = sinks.usage[0]
+        assert record.succeeded is False
+        assert record.attempts == 2
+        assert record.cost.microusd == 30
+        assert sinks.events[0][0] == "llm_call_failed"
+        assert sinks.alerts == []
 
 
 class TestJSONRecovery:

@@ -149,7 +149,7 @@ These are enforced by tests, not by convention:
 | Unknown cost is `UNAVAILABLE`, not `USD 0` | "Free" and "unknown" are different facts |
 | Cost aggregates **every billable attempt** | A retry that failed may still be invoiced |
 | An unusable answer is a *billed, failed* attempt | Invalid JSON still cost money, and the fallback still gets a turn |
-| Each attempt carries a typed `failure_phase` | `provider`, `timeout`, `output_parsing` or `schema_validation`, without parsing a message |
+| Each attempt carries a typed `failure_phase` | `configuration`, `provider`, `timeout`, `output_parsing` or `schema_validation`, without parsing a message |
 | Every attempt sends only options its model accepts | A fallback must not fail on a `temperature` the next model rejects |
 | Fallback is off by default and always visible | A silent model switch corrupts A/B comparisons and cost attribution |
 | Exhausted calls **raise** | They never return something that looks like a success |

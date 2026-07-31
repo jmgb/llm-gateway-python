@@ -35,6 +35,7 @@ from llm_gateway.contracts import (
 )
 from llm_gateway.errors import (
     AllAttemptsFailed,
+    ConfigurationError,
     LLMGatewayError,
     OutputError,
     ProviderError,
@@ -323,6 +324,8 @@ def _record_attempt(
 
 def _phase_of(failure: LLMGatewayError) -> FailurePhase:
     """Classify structurally, so a consumer never has to parse a message."""
+    if isinstance(failure, ConfigurationError):
+        return FailurePhase.CONFIGURATION
     if isinstance(failure, SchemaValidationError):
         return FailurePhase.SCHEMA_VALIDATION
     if isinstance(failure, OutputError):

@@ -84,6 +84,9 @@ class FailurePhase(Enum):
     alerting want that distinction without importing the error hierarchy.
     """
 
+    CONFIGURATION = "configuration"
+    """The request was rejected before provider dispatch."""
+
     PROVIDER = "provider"
     """The provider rejected the call or never answered."""
 

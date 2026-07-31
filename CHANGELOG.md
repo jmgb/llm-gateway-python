@@ -29,9 +29,10 @@ consumer pins an immutable tag and upgrades through its own pull request.
   rejects it: a field with a default is omitted from `required`, and no object
   declares `additionalProperties: false`. `providers/strict_schema.py` now
   rewrites the schema recursively — root, `$defs`, nested objects and union
-  branches — leaving `$ref` intact. A construct strict mode cannot express,
-  such as a free-form `dict[str, str]`, raises `ConfigurationError` naming the
-  field instead of buying a provider 400 on every attempt.
+  branches — removing nullable defaults and expanding a `$ref` only when
+  sibling metadata has to be preserved. A construct strict mode cannot
+  express, such as a free-form `dict[str, str]`, raises `ConfigurationError`
+  naming the field instead of buying a provider 400 on every attempt.
 
 - **Request options are adapted to the target model, not only reasoning
   effort.** A fallback onto a model of the OpenAI 5.6 family inherited the
@@ -55,10 +56,11 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Added
 
-- `Attempt.failure_phase`, a typed `FailurePhase` — `provider`, `timeout`,
-  `output_parsing` or `schema_validation`. `error_type` alone forced a consumer
-  to rebuild the context from a class name to tell "the provider refused" from
-  "the provider answered, was paid, and the answer was unusable".
+- `Attempt.failure_phase`, a typed `FailurePhase` — `configuration`,
+  `provider`, `timeout`, `output_parsing` or `schema_validation`. `error_type`
+  alone forced a consumer to rebuild the context from a class name to tell
+  "the request never left the process" from "the provider answered, was paid,
+  and the answer was unusable".
 
 - `tests/contract/test_structured_fallback.py`: every adapter is driven through
   the gateway with a fake client and held to the same behaviour — invalid JSON,

@@ -7,7 +7,9 @@ subset. Two of Pydantic's perfectly ordinary outputs are outside it:
 * a field with a default is left out of ``required`` — strict mode has no
   notion of optional and rejects the schema;
 * no object declares ``additionalProperties``, which strict mode requires to
-  be ``false``.
+  be ``false``;
+* nullable defaults and a ``$ref`` with sibling metadata need normalising
+  before they fit the provider's accepted subset.
 
 Sending the raw schema therefore buys a 400 on every structured call. Worse, it
 buys it *per attempt*, so a fallback chain spends its whole plan discovering the
@@ -35,13 +37,16 @@ _NAMED_SCHEMA_MAP_KEYS = ("$defs", "definitions", "properties", "patternProperti
 
 def strict_json_schema(schema: type[BaseModel]) -> dict[str, Any]:
     """The model's schema, normalised for the Responses API's strict mode."""
-    return cast("dict[str, Any]", _strict(schema.model_json_schema(), path=schema.__name__))
+    raw = schema.model_json_schema()
+    return cast("dict[str, Any]", _strict(raw, path=schema.__name__, root=raw))
 
 
-def _strict(node: Any, *, path: str) -> Any:
+def _strict(node: Any, *, path: str, root: dict[str, Any]) -> Any:
     """Rewrite one subschema, returning a copy: the caller's dict is not ours."""
     if isinstance(node, list):
-        return [_strict(item, path=f"{path}[{index}]") for index, item in enumerate(node)]
+        return [
+            _strict(item, path=f"{path}[{index}]", root=root) for index, item in enumerate(node)
+        ]
     if not isinstance(node, dict):
         return node
 
@@ -51,18 +56,45 @@ def _strict(node: Any, *, path: str) -> Any:
         nested = rewritten.get(key)
         if isinstance(nested, dict):
             rewritten[key] = {
-                name: _strict(value, path=f"{path}.{name}") for name, value in nested.items()
+                name: _strict(value, path=f"{path}.{name}", root=root)
+                for name, value in nested.items()
             }
     for key in _NESTED_SCHEMA_KEYS:
         if key in rewritten:
-            rewritten[key] = _strict(rewritten[key], path=f"{path}.{key}")
+            rewritten[key] = _strict(rewritten[key], path=f"{path}.{key}", root=root)
     for key in _NESTED_SCHEMA_LIST_KEYS:
         if key in rewritten:
-            rewritten[key] = _strict(rewritten[key], path=f"{path}.{key}")
+            rewritten[key] = _strict(rewritten[key], path=f"{path}.{key}", root=root)
+
+    if rewritten.get("default", object()) is None:
+        rewritten.pop("default")
+
+    ref = rewritten.get("$ref")
+    if isinstance(ref, str) and len(rewritten) > 1:
+        resolved = _resolve_local_ref(root, ref, path=path)
+        rewritten = {**resolved, **rewritten}
+        rewritten.pop("$ref")
+        return _strict(rewritten, path=path, root=root)
 
     if _is_object(rewritten):
         _close(rewritten, path=path)
     return rewritten
+
+
+def _resolve_local_ref(root: dict[str, Any], ref: str, *, path: str) -> dict[str, Any]:
+    """Resolve the local references Pydantic emits before merging sibling metadata."""
+    if not ref.startswith("#/"):
+        raise ConfigurationError(f"{path} contains unsupported external reference {ref!r}")
+
+    resolved: Any = root
+    for raw_key in ref[2:].split("/"):
+        key = raw_key.replace("~1", "/").replace("~0", "~")
+        if not isinstance(resolved, dict) or key not in resolved:
+            raise ConfigurationError(f"{path} contains unresolved reference {ref!r}")
+        resolved = resolved[key]
+    if not isinstance(resolved, dict):
+        raise ConfigurationError(f"{path} reference {ref!r} does not point to a schema")
+    return resolved
 
 
 def _is_object(node: dict[str, Any]) -> bool:
