@@ -17,10 +17,13 @@ So these tests spend real tokens on the smallest prompts that still prove the
 point. They are marked `live` and deselected by default: `uv run pytest` stays
 offline and free. Run them deliberately:
 
+    uv sync --extra groq --extra openrouter
     GROQ_API_KEY=... uv run pytest -m live
 
-A provider whose key is absent is skipped, not failed — a contributor without
-an account should not see a red suite.
+Note the extras: the canonical environment installs none, because that is what
+makes the "extra not installed" tests meaningful. So these tests skip when the
+SDK is missing *and* when the key is absent — a contributor holding neither
+should not see a red suite.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from llm_gateway import (
     ResponseFormat,
     RetryPolicy,
 )
+from llm_gateway.errors import ProviderNotInstalled
 from llm_gateway.factories import create_groq_client, create_openrouter_client
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openrouter import OpenRouterAdapter
@@ -79,23 +83,31 @@ def provider(request: pytest.FixtureRequest) -> Iterator[str]:
 async def adapter(provider: str) -> AsyncIterator[Any]:
     """A real adapter, whose SDK client is closed before the test ends.
 
-    Leaving the client to be garbage-collected emits `ResourceWarning` for the
-    open socket, and this suite turns warnings into errors — so an unclosed
-    client would fail a test that had already passed.
+    Two reasons to skip rather than fail, and both describe the canonical
+    development environment: it installs no provider extra, and a contributor
+    need not hold an account with every provider. Either gap is a test that
+    cannot run, not a test that failed.
+
+    Closing the client matters because leaving it to be garbage-collected emits
+    `ResourceWarning` for the open socket, and this suite turns warnings into
+    errors — so an unclosed client would fail a test that had already passed.
     """
-    if provider == "groq":
-        key = os.environ.get("GROQ_API_KEY")
-        if not key:
-            pytest.skip("GROQ_API_KEY is not set")
-        client = create_groq_client(api_key=key)
-        yield GroqAdapter(client)
-    else:
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not key:
-            pytest.skip("OPENROUTER_API_KEY is not set")
-        client = create_openrouter_client(api_key=key)
-        yield OpenRouterAdapter(client)
-    await client.close()
+    variable = "GROQ_API_KEY" if provider == "groq" else "OPENROUTER_API_KEY"
+    key = os.environ.get(variable)
+    if not key:
+        pytest.skip(f"{variable} is not set")
+
+    build = create_groq_client if provider == "groq" else create_openrouter_client
+    try:
+        client = build(api_key=key)
+    except ProviderNotInstalled as absent:
+        pytest.skip(str(absent))
+
+    adapter_class = GroqAdapter if provider == "groq" else OpenRouterAdapter
+    try:
+        yield adapter_class(client)
+    finally:
+        await client.close()
 
 
 async def test_a_plain_json_request_is_accepted_without_the_caller_saying_json(
