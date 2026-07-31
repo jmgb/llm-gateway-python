@@ -128,6 +128,15 @@ async def test_the_word_json_reaches_a_provider_that_requires_it(provider: str) 
     assert "json" in json.dumps(seen["messages"], default=str).casefold()
 
 
+def _plain_json_request(model: str, *, system_prompt: str | None = None) -> LLMRequest:
+    return LLMRequest(
+        model=model,
+        system_prompt=system_prompt,
+        messages=(Message("user", "a question"),),
+        response_format=ResponseFormat.JSON_OBJECT,
+    )
+
+
 @pytest.mark.parametrize("provider", sorted(ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT))
 async def test_a_plain_json_request_carries_no_schema(provider: str) -> None:
     """`JSON_OBJECT` asks for no particular shape, so none is described."""
@@ -135,16 +144,41 @@ async def test_a_plain_json_request_carries_no_schema(provider: str) -> None:
     seen: dict[str, Any] = {}
     adapter = adapter_class(_echoing_client(seen))
 
-    await adapter.generate(
-        LLMRequest(
-            model=model,
-            messages=(Message("user", "a question"),),
-            response_format=ResponseFormat.JSON_OBJECT,
-        ),
-        model=model,
-    )
+    await adapter.generate(_plain_json_request(model), model=model)
 
     assert "verdict" not in json.dumps(seen, default=str)
+
+
+@pytest.mark.parametrize("provider", sorted(ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT))
+async def test_a_plain_json_request_still_says_json(provider: str) -> None:
+    """Groq answers HTTP 400 when `json_object` is asked for without the word.
+
+    `JSON_OBJECT` describes no schema, so the schema instruction does not apply
+    — but the requirement is about the mode, not about the shape. Whoever sets
+    `response_format` owns satisfying it; leaving it to the caller's prompt
+    turns a plain JSON request into a 400 whenever they did not think to
+    mention the word.
+    """
+    adapter_class, model = ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT[provider]
+    seen: dict[str, Any] = {}
+    adapter = adapter_class(_echoing_client(seen))
+
+    await adapter.generate(_plain_json_request(model), model=model)
+
+    assert "json" in json.dumps(seen["messages"], default=str).casefold()
+
+
+@pytest.mark.parametrize("provider", sorted(ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT))
+async def test_a_caller_who_already_said_json_is_left_alone(provider: str) -> None:
+    """The requirement is already met, so nothing is added to their prompt."""
+    adapter_class, model = ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT[provider]
+    seen: dict[str, Any] = {}
+    adapter = adapter_class(_echoing_client(seen))
+    spoken_for = "Answer as JSON, with one key per finding."
+
+    await adapter.generate(_plain_json_request(model, system_prompt=spoken_for), model=model)
+
+    assert seen["messages"][0]["content"] == spoken_for
 
 
 @pytest.mark.parametrize("provider", sorted(ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT))

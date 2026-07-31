@@ -184,11 +184,17 @@ Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
 
 A provider that declares `structured_outputs=False` has no API field that binds
-the answer to a shape, so its adapter states the requested schema in the
-conversation instead of dropping it. Otherwise the model answers valid JSON
-under keys of its own choosing, validation rejects it, the attempt is billed
-anyway and the fallback serves every structured call — a result that looks
-correct and shows up only on the invoice.
+the answer to a shape, so its adapter states the requested schema in the system
+prompt instead of dropping it. Otherwise the model answers valid JSON under keys
+of its own choosing, validation rejects it, the attempt is billed anyway and the
+fallback serves every structured call — a result that looks correct and shows up
+only on the invoice.
+
+The same adapters add one sentence asking for JSON when `JSON_OBJECT` is
+requested, because Groq rejects that mode with HTTP 400 unless the word appears
+in the messages. Setting `response_format` is what creates the obligation, so
+the adapter meets it rather than the caller's prompt — and a prompt that already
+says "json" is left as it is.
 
 `function_calling`, `inline_files` and `remote_files` are declared `False` on
 every adapter, even where the provider supports them: this package's request

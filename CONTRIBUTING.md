@@ -63,6 +63,26 @@ Tests must not make network calls. If you cannot test something without a
 network, that is usually a sign the seam is in the wrong place — reach for an
 injected client, as the existing adapters do.
 
+### The one exception: `-m live`
+
+`tests/live/` calls real providers and spends real money. It is deselected by
+default, so `uv run pytest` stays offline and free; run it deliberately, with
+whichever keys you have:
+
+```bash
+GROQ_API_KEY=... OPENROUTER_API_KEY=... uv run pytest -m live
+```
+
+It exists because a fake client has one blind spot that has already cost money:
+it accepts any payload, so it cannot reject a request the way a provider does,
+and it cannot invent field names the way a model does. Groq's HTTP 400 for a
+`json_object` request that never says "json" is not reproducible against a
+fake, and neither is a model answering valid JSON under keys nobody asked for.
+
+Keep it that way — a narrow suite for failures only a provider can produce, not
+a second home for logic the fakes already cover. A provider whose key is absent
+skips rather than fails.
+
 ## Tests first
 
 Write the failing test before the implementation, and watch it fail for the

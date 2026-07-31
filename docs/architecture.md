@@ -23,22 +23,24 @@ Provider-shaped code moved here. Product-shaped code stayed in the application.
 | JSON recovery | `json_payload.py` | A provider-shaped problem |
 | Deciding whether an answer is usable | `gateway.py` | It decides whether the attempt failed, so it cannot sit after the attempt |
 | Adapting a request to the target model | `gateway.py`, `models.py` | A fallback inherits a request written for another model |
-| Describing a schema a provider cannot enforce | `providers/schema_prompt.py` | Which providers enforce schemas changes with the provider |
+| Satisfying what a response format needs said | `providers/schema_prompt.py` | Which providers enforce schemas, or demand the word "json", changes with the provider |
 | Ledger, tenant, alerting, history | The application | Changes with the product |
 | Prompts, business schemas, model choice per feature | The application | Changes with the product |
 
 Those last two rows sit closer together than they look. An adapter declaring
 `structured_outputs=False` cannot bind the answer to a shape through any API
-field, so it states the caller's schema in the messages — text this package
-sends that the application did not write.
+field, and Groq will not even accept `json_object` unless the messages say
+"json". So the adapter appends to the system prompt — text this package sends
+that the application did not write.
 
 That is not a prompt, and the distinction is what keeps the boundary intact: it
 carries no tone, no task framing and no examples, only the JSON Schema the
-caller already declared and a sentence saying it is binding. The *shape* is the
-caller's; **whether it has to be spelled out is a fact about the provider**, and
-a fact about the provider belongs here. The alternative is not neutrality —
-dropping the schema makes every structured call fail validation and fall back,
-which is a louder product decision than describing it.
+caller already declared, or one sentence naming the format they asked for. The
+*shape* is the caller's; **whether it has to be spelled out is a fact about the
+provider**, and a fact about the provider belongs here. The alternative is not
+neutrality — dropping the schema makes every structured call fall back, and
+omitting the word makes every plain JSON call a 400. Both are louder product
+decisions than saying the sentence.
 
 ## Layers
 

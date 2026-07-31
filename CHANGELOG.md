@@ -23,16 +23,35 @@ consumer pins an immutable tag and upgrades through its own pull request.
   result and a fallback notice — so it was visible on the invoice and nowhere
   else. Two applications hit it against Groq's `openai/gpt-oss-120b`.
 
-  Both adapters now state the schema in the messages. This also satisfies
-  Groq's requirement that the word "json" appear in the messages before it
-  accepts `json_object`, which an adapter asking for JSON mode owns rather than
-  leaving to the caller's prompt. `ResponseFormat.JSON_OBJECT` is unchanged: it
-  requests no particular shape, so none is described.
+  Both adapters now append what the requested format needs to the system
+  prompt: the JSON Schema for `JSON_SCHEMA`, and one sentence asking for JSON
+  for `JSON_OBJECT`.
 
   This changes cost accounting for anyone calling those providers with a
   schema: the fallback stops running on every call, so the model that answers,
   the amount billed and the attempt count all change — to what they should have
   been.
+
+- **`ResponseFormat.JSON_OBJECT` no longer fails outright on Groq.** Groq
+  rejects `json_object` with HTTP 400 unless the word "json" appears in the
+  messages, and OpenAI documents the same rule. The adapter set that mode
+  without guaranteeing the word, so a plain JSON request was a 400 whenever the
+  caller's prompt did not happen to mention it — for a mode the caller asked
+  for through the neutral contract, not through a provider quirk they could
+  have known about.
+
+  Whoever sets `response_format` now satisfies its precondition. A caller whose
+  system prompt already says "json" is left untouched, so nothing is appended
+  to a prompt that does not need it.
+
+### Added
+
+- **A `live` test suite that calls real providers.** Both fixes above are for
+  failures a fake client cannot produce: it accepts any payload, so it never
+  answers HTTP 400, and it returns queued text, so it never invents field
+  names. `tests/live/` covers exactly that gap and is deselected by default —
+  `uv run pytest` stays offline and free; `uv run pytest -m live` with the
+  provider keys spends real tokens. A provider whose key is absent skips.
 
 ## [0.8.0] — 2026-07-31
 

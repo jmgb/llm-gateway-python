@@ -92,6 +92,13 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = ["error"]
+# Live tests call real providers and spend real money, so they are opt-in:
+# deselected by default, and run with `-m live` plus the provider keys. They
+# exist because the fakes cannot see a 400 that only the provider can send.
+addopts = "-m 'not live'"
+markers = [
+    "live: calls a real provider API. Costs money; needs credentials; skipped by default.",
+]
 
 [tool.ruff]
 line-length = 100
