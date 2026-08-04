@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from llm_gateway.errors import ProviderNotInstalled
+from llm_gateway.providers.assemblyai import AssemblyAIAdapter, AssemblyAIHttpClient
 from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
@@ -23,11 +24,21 @@ from llm_gateway.registry import ProviderRegistry
 
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 GEMINI_MODEL_PREFIXES = ("gemini-3", "models/gemini-3")
-GROQ_MODEL_PREFIXES = ("llama", "mixtral", "gemma", "qwen", "kimi", "groq/")
+GROQ_MODEL_PREFIXES = (
+    "llama",
+    "mixtral",
+    "gemma",
+    "qwen",
+    "kimi",
+    "groq/",
+    "whisper-",
+    "distil-whisper-",
+)
 OPENROUTER_MODEL_PREFIXES = ("openrouter/",)
 """Deliberately short. OpenRouter's catalogued models route by their declared
 provider, and any other ``vendor/model`` id reaches it through the namespace
 rule in :mod:`llm_gateway.models` — so only OpenRouter's own ids need listing."""
+ASSEMBLYAI_MODEL_PREFIXES = ("assemblyai-",)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -90,12 +101,19 @@ def create_groq_client(*, api_key: str) -> Any:
     return AsyncGroq(api_key=api_key)
 
 
+def create_assemblyai_client(*, api_key: str) -> Any:
+    """Build the small REST client used by the AssemblyAI adapter."""
+    _require_key(api_key)
+    return AssemblyAIHttpClient(api_key=api_key)
+
+
 def build_registry(
     *,
     openai_client: Any | None = None,
     gemini_client: Any | None = None,
     groq_client: Any | None = None,
     openrouter_client: Any | None = None,
+    assemblyai_client: Any | None = None,
     extra_openai_prefixes: tuple[str, ...] = (),
 ) -> ProviderRegistry:
     """Register the adapters for the clients the application supplies.
@@ -117,6 +135,10 @@ def build_registry(
     if openrouter_client is not None:
         registry.register(
             OpenRouterAdapter(openrouter_client), model_prefixes=OPENROUTER_MODEL_PREFIXES
+        )
+    if assemblyai_client is not None:
+        registry.register(
+            AssemblyAIAdapter(assemblyai_client), model_prefixes=ASSEMBLYAI_MODEL_PREFIXES
         )
 
     if not registry.provider_names:

@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from llm_gateway import CostMeasurement, TokenUsage
+from llm_gateway import AudioUsage, CostMeasurement, TokenUsage, builtin_audio_price_catalog
 from llm_gateway.models import (
     CATALOG_VERSION,
     MODEL_CATALOG,
@@ -22,6 +22,80 @@ from llm_gateway.models import (
 
 
 class TestIdentity:
+    def test_current_openrouter_models_are_catalogued_with_their_published_rates(self) -> None:
+        expected = {
+            "anthropic/claude-sonnet-4.6": ("3", "15", True),
+            "x-ai/grok-4.5": ("2", "6", True),
+            "~anthropic/claude-sonnet-latest": ("2", "10", False),
+            "~anthropic/claude-opus-latest": ("5", "25", True),
+            "~deepseek/deepseek-v4-flash-latest": ("0.09", "0.18", True),
+            "~moonshotai/kimi-latest": ("2.9", "14", True),
+            "qwen/qwen3.8-max": ("2", "6", True),
+        }
+
+        for model_id, (input_price, output_price, supports_temperature) in expected.items():
+            info = lookup_model(model_id)
+
+            assert info is not None
+            assert info.provider == "openrouter"
+            assert resolve_provider(model_id) == "openrouter"
+            assert info.input_usd_per_mtok == Decimal(input_price)
+            assert info.output_usd_per_mtok == Decimal(output_price)
+            assert info.supports_temperature is supports_temperature
+
+    def test_removed_models_are_not_in_the_catalogue(self) -> None:
+        removed = {
+            "gemini-3-flash-preview",
+            "gemini-3-pro-preview",
+            "gemini-3-pro-image",
+            "deepseek/deepseek-chat-v3.1",
+            "deepseek/deepseek-r1-distill-qwen-7b",
+            "google/gemini-3-flash-preview",
+            "google/gemini-3-pro-preview",
+            "moonshotai/kimi-k2-thinking",
+            "moonshotai/kimi-k2.6",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "meta-llama/llama-4-maverick-17b-128e-instruct",
+            "gpt-5.1-2025-11-13",
+            "gpt-5.2-2025-12-11",
+            "gpt-realtime-2025-08-28",
+            "gpt-realtime-mini-2025-10-06",
+            "gpt-realtime-mini-2025-12-15",
+            "gpt-realtime-1.5-2026-02-25",
+        }
+
+        assert removed.isdisjoint(MODEL_CATALOG)
+
+    def test_current_openai_audio_models_use_their_current_ids(self) -> None:
+        expected = {
+            "gpt-realtime-2.1",
+            "gpt-realtime-2.1-mini",
+            "gpt-transcribe",
+        }
+
+        assert expected <= {model.id for model in models_by_provider("openai")}
+
+        transcribe = lookup_model("gpt-transcribe")
+        assert transcribe is not None
+        assert transcribe.pricing_unit == "audio_minutes"
+        assert transcribe.audio_usd_per_minute == Decimal("0.0045")
+
+    def test_assemblyai_and_groq_whisper_models_are_catalogued_as_audio(self) -> None:
+        expected = {
+            "assemblyai-universal-3-5-pro": ("assemblyai", "0.0035"),
+            "assemblyai-universal-2": ("assemblyai", "0.0025"),
+            "whisper-large-v3-turbo": ("groq", "0.0006666666666666666666666667"),
+            "whisper-large-v3": ("groq", "0.00185"),
+            "distil-whisper-large-v3-en": ("groq", "0.0003333333333333333333333333"),
+        }
+
+        for model_id, (provider, rate) in expected.items():
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.provider == provider
+            assert info.pricing_unit == "audio_minutes"
+            assert info.audio_usd_per_minute == Decimal(rate)
+
     def test_a_known_model_reports_its_provider(self) -> None:
         gemini = lookup_model("gemini-3.5-flash-lite")
         openai = lookup_model("gpt-5.6-luna")
@@ -33,7 +107,7 @@ class TestIdentity:
         assert lookup_model("some-model-that-does-not-exist") is None
 
     def test_every_entry_declares_a_provider_the_package_can_serve(self) -> None:
-        servable = {"openai", "gemini", "groq", "openrouter"}
+        servable = {"openai", "gemini", "groq", "openrouter", "assemblyai"}
 
         for model_id, info in MODEL_CATALOG.items():
             assert info.provider in servable, f"{model_id} has provider {info.provider}"
@@ -52,7 +126,6 @@ class TestIdentity:
             assert info.reasoning_efforts == openai_expected
 
         for model_id in (
-            "gemini-3-flash-preview",
             "gemini-3.1-flash-lite-preview",
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
@@ -62,7 +135,7 @@ class TestIdentity:
             assert info is not None
             assert info.reasoning_efforts == ("minimal", "low", "medium", "high")
 
-        for model_id in ("gemini-3-pro-preview", "gemini-3.1-pro-preview"):
+        for model_id in ("gemini-3.1-pro-preview",):
             info = lookup_model(model_id)
             assert info is not None
             assert info.reasoning_efforts == ("low", "medium", "high")
@@ -84,18 +157,34 @@ class TestProviderRouting:
         """`openai/gpt-oss-120b` is served by Groq, despite the prefix."""
         assert resolve_provider("openai/gpt-oss-120b") == "groq"
 
-    def test_a_namespaced_model_defaults_to_openrouter(self) -> None:
-        assert resolve_provider("somevendor/some-new-model") == "openrouter"
+    def test_an_uncatalogued_namespaced_model_is_not_guessed(self) -> None:
+        assert resolve_provider("somevendor/some-new-model") is None
 
-    def test_a_models_prefixed_gemini_id_routes_to_gemini(self) -> None:
-        assert resolve_provider("models/gemini-3.5-flash-lite") == "gemini"
+    def test_an_uncatalogued_models_namespace_is_not_guessed(self) -> None:
+        assert resolve_provider("models/gemini-3.5-flash-lite") is None
 
     def test_removed_gemini_25_models_are_not_routable(self) -> None:
         assert resolve_provider("gemini-2.5-flash") is None
         assert resolve_provider("google/gemini-2.5-flash") is None
 
-    def test_an_uncatalogued_gpt_routes_to_openai(self) -> None:
-        assert resolve_provider("gpt-6-unreleased") == "openai"
+    def test_an_uncatalogued_direct_model_is_not_guessed(self) -> None:
+        assert resolve_provider("gpt-6-unreleased") is None
+
+    def test_uncatalogued_provider_namespaces_are_not_guessed(self) -> None:
+        for model_id in (
+            "qwen/future-model",
+            "meta-llama/future-model",
+            "moonshotai/future-model",
+        ):
+            assert resolve_provider(model_id) is None
+
+    def test_uncatalogued_groq_family_ids_are_not_guessed(self) -> None:
+        for model_id in (
+            "llama-4-future",
+            "mixtral-9-future",
+            "gemma3-future",
+        ):
+            assert resolve_provider(model_id) is None
 
     def test_an_unroutable_id_returns_none_rather_than_guessing_wrong(self) -> None:
         assert resolve_provider("totally-unknown") is None
@@ -136,6 +225,21 @@ class TestBuiltinPrices:
         )
 
         assert cost.measurement is CostMeasurement.UNAVAILABLE
+
+    def test_audio_pricing_is_not_mistaken_for_token_pricing(self) -> None:
+        cost = builtin_price_catalog().estimate(
+            "gpt-transcribe", TokenUsage(input_tokens=100, output_tokens=100)
+        )
+
+        assert cost.measurement is CostMeasurement.UNAVAILABLE
+
+    def test_audio_catalog_prices_duration_and_applies_groq_minimum(self) -> None:
+        catalog = builtin_audio_price_catalog()
+
+        cost = catalog.estimate("whisper-large-v3-turbo", AudioUsage(duration_seconds=1.0))
+
+        assert cost.amount_usd == Decimal("0.000111")
+        assert cost.measurement is CostMeasurement.ACTUAL
 
     def test_output_is_priced_at_the_output_rate(self) -> None:
         cost = builtin_price_catalog().estimate(
@@ -224,8 +328,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-07-31"
-    PRICE_FINGERPRINT = "90d7b71c6d5ddfddd0a728608d6a16ac0313ff0859615c40365da678b995daf9"
+    PRICED_AT_VERSION = "2026-08-04.3"
+    PRICE_FINGERPRINT = "79c61d493483b596afb6c9b8e1a97e17e71c02c810f008c80fa73f925278aed0"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -236,8 +340,10 @@ class TestPricesAndVersionMoveTogether:
         """
         micro = Decimal("0.000001")
         priced = sorted(
-            f"{info.id}\t{info.input_usd_per_mtok.quantize(micro)}"
+            f"{info.id}\t{info.pricing_unit}"
+            f"\t{info.input_usd_per_mtok.quantize(micro)}"
             f"\t{info.output_usd_per_mtok.quantize(micro)}"
+            f"\t{(info.audio_usd_per_minute or Decimal('0')).quantize(micro)}"
             for info in MODEL_CATALOG.values()
         )
         return hashlib.sha256("\n".join(priced).encode()).hexdigest()
@@ -264,7 +370,7 @@ class TestDeclaredRequestOptions:
 
     def test_a_model_that_says_nothing_keeps_accepting_temperature(self) -> None:
         """Silence is not evidence of a refusal; the permissive answer is the default."""
-        info = lookup_model("gpt-5.2-2025-12-11")
+        info = lookup_model("gpt-realtime-2.1-mini")
 
         assert info is not None
         assert info.supports_temperature is True

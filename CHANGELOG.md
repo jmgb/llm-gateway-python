@@ -9,6 +9,33 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the model catalogue to remove the requested legacy Gemini, DeepSeek,
+  Groq Llama and GPT-5.1/5.2 identifiers.
+- Replaced the legacy realtime identifiers with `gpt-realtime-2.1` and
+  `gpt-realtime-2.1-mini`, and removed the duplicate older mini entry.
+- Removed the obsolete OpenRouter entries for Gemini 3 preview and Kimi K2.
+- Removed provider-family and namespace guesses from fallback routing. Unknown
+  models now require an explicit catalogue entry or consumer-supplied prefix.
+
+### Added
+
+- Added OpenAI's `gpt-transcribe` identity with its `$0.0045` per audio-minute
+  rate. It is routed as an OpenAI model but remains outside token-based cost
+  estimation.
+- Added the independent transcription contract: `TranscriptionRequest`,
+  `AudioInput`, `AudioUsage`, `AudioCost` and `LLMGateway.transcribe()`.
+  OpenAI, Groq Whisper and AssemblyAI adapters support provider-specific audio
+  transports, explicit fallback and duration-based accounting.
+- Added OpenAI remote-file attachments for Responses analysis. Unsupported
+  providers reject attachments instead of silently dropping them.
+- Added `assemblyai` as an optional extra and catalogued AssemblyAI Universal,
+  Groq Whisper and OpenAI transcription models outside token pricing.
+- Added seven current OpenRouter entries: Claude Sonnet 4.6, Grok 4.5, the
+  Sonnet and Opus latest aliases, the DeepSeek V4 Flash and MoonshotAI Kimi
+  latest aliases, and Qwen3.8 Max.
+
 ## [0.9.0] — 2026-07-31
 
 ### Fixed

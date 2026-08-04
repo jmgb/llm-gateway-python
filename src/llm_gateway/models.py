@@ -1,9 +1,9 @@
 """The shared model catalogue: identity, provider and price.
 
-This is the single place where a price is updated. One versioned table beats
-several copies drifting apart, and a model's price is a fact about the
-*provider*, not about any product — which is exactly the test for what belongs
-in this package.
+This is the single place where a model's identity and pricing metadata are
+updated. One versioned table beats several copies drifting apart, and a
+model's price is a fact about the *provider*, not about any product — which is
+exactly the test for what belongs in this package.
 
 What stays out: **which model a feature should use**. That is a product
 decision, and putting it here would make one repository's choice everybody's.
@@ -18,6 +18,10 @@ them. Rates are consumed as **microUSD per token**. Those are the same number:
 so the conversion is the identity, and there is no factor to get wrong. There
 is a test asserting exactly that.
 
+Models billed by audio duration use ``pricing_unit="audio_minutes"`` and keep
+their per-minute rate separately. They are routable through the catalogue but
+are intentionally excluded from the token price catalog.
+
 ## Updating
 
 Change the price, bump ``CATALOG_VERSION``, tag a release. Consumers pin a tag,
@@ -29,14 +33,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 
 from llm_gateway.contracts import ReasoningEffort
-from llm_gateway.pricing import ModelRate, StaticPriceCatalog
+from llm_gateway.pricing import AudioRate, ModelRate, StaticAudioPriceCatalog, StaticPriceCatalog
 
-CATALOG_VERSION = "2026-07-31"
+CATALOG_VERSION = "2026-08-04.3"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
+PricingUnit = Literal["tokens", "audio_minutes"]
 OPENAI_56_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "none",
     "low",
@@ -65,7 +71,7 @@ GROQ_GPT_OSS_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
 
 @dataclass(frozen=True, slots=True)
 class ModelInfo:
-    """One model: provider, price, and explicitly supported request options."""
+    """One model: provider, pricing metadata, and supported request options."""
 
     id: str
     provider: Provider
@@ -80,13 +86,28 @@ class ModelInfo:
     Declared rather than inferred, and defaulting to the permissive answer:
     an entry that says nothing keeps sending what the caller asked for.
     """
+    pricing_unit: PricingUnit = "tokens"
+    audio_usd_per_minute: Decimal | None = None
+    """Audio rate for models billed by duration instead of tokens."""
+    audio_minimum_seconds: int = 0
 
     @property
     def rate(self) -> ModelRate:
         """USD per million tokens read as microUSD per token — same number."""
+        if self.pricing_unit != "tokens":
+            raise ValueError(f"{self.id!r} is priced in {self.pricing_unit}, not tokens")
         return ModelRate(
             input_microusd_per_token=self.input_usd_per_mtok,
             output_microusd_per_token=self.output_usd_per_mtok,
+        )
+
+    @property
+    def audio_rate(self) -> AudioRate:
+        if self.pricing_unit != "audio_minutes" or self.audio_usd_per_minute is None:
+            raise ValueError(f"{self.id!r} does not have an audio-minute rate")
+        return AudioRate(
+            usd_per_minute=self.audio_usd_per_minute,
+            minimum_billable_seconds=self.audio_minimum_seconds,
         )
 
 
@@ -100,6 +121,9 @@ def _m(
     notes: str = "",
     reasoning_efforts: tuple[ReasoningEffort, ...] = (),
     supports_temperature: bool = True,
+    pricing_unit: PricingUnit = "tokens",
+    audio_price_per_minute: str | None = None,
+    audio_minimum_seconds: int = 0,
 ) -> ModelInfo:
     return ModelInfo(
         id=model_id,
@@ -110,13 +134,16 @@ def _m(
         notes=notes,
         reasoning_efforts=reasoning_efforts,
         supports_temperature=supports_temperature,
+        pricing_unit=pricing_unit,
+        audio_usd_per_minute=(
+            Decimal(audio_price_per_minute) if audio_price_per_minute is not None else None
+        ),
+        audio_minimum_seconds=audio_minimum_seconds,
     )
 
 
 _ENTRIES: tuple[ModelInfo, ...] = (
     # ---- OpenAI ---------------------------------------------------------
-    _m("gpt-5.1-2025-11-13", "openai", "1.25", "10.00"),
-    _m("gpt-5.2-2025-12-11", "openai", "1.75", "14.00"),
     # The 5.6 family rejects `temperature`: reasoning replaces it, and sending
     # it fails the whole call. A fallback onto one of these must not inherit it.
     _m(
@@ -144,11 +171,62 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
         supports_temperature=False,
     ),
-    _m("gpt-realtime-2025-08-28", "openai", "32.00", "64.00", notes="realtime audio"),
-    _m("gpt-realtime-mini-2025-10-06", "openai", "10.00", "20.00", notes="realtime audio"),
-    _m("gpt-realtime-mini-2025-12-15", "openai", "10.00", "20.00", notes="realtime audio"),
-    _m("gpt-realtime-1.5-2026-02-25", "openai", "32.00", "64.00", notes="realtime audio"),
+    _m("gpt-realtime-2.1", "openai", "32.00", "64.00", notes="realtime audio"),
+    _m("gpt-realtime-2.1-mini", "openai", "10.00", "20.00", notes="realtime audio"),
+    _m(
+        "gpt-transcribe",
+        "openai",
+        "0",
+        "0",
+        notes="speech-to-text; billed at USD 0.0045 per audio minute",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.0045",
+    ),
+    _m(
+        "gpt-4o-mini-transcribe-2025-12-15",
+        "openai",
+        "0",
+        "0",
+        notes="speech-to-text; billed at USD 0.006 per audio minute",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.006",
+    ),
     # ---- Groq (OpenAI-compatible ids, served by Groq) -------------------
+    _m(
+        "whisper-large-v3-turbo",
+        "groq",
+        "0",
+        "0",
+        notes="Whisper speech-to-text; billed at USD 0.04 per audio hour",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.0006666666666666666666666667",
+        audio_minimum_seconds=10,
+    ),
+    _m(
+        "whisper-large-v3",
+        "groq",
+        "0",
+        "0",
+        notes="Whisper speech-to-text; billed at USD 0.111 per audio hour",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.00185",
+        audio_minimum_seconds=10,
+    ),
+    _m(
+        "distil-whisper-large-v3-en",
+        "groq",
+        "0",
+        "0",
+        notes="English-only Whisper speech-to-text; billed at USD 0.02 per audio hour",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.0003333333333333333333333333",
+        audio_minimum_seconds=10,
+    ),
     _m(
         "openai/gpt-oss-120b",
         "groq",
@@ -165,24 +243,28 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         notes="the openai/ prefix is not OpenAI",
         reasoning_efforts=GROQ_GPT_OSS_REASONING_EFFORTS,
     ),
-    _m("meta-llama/llama-4-scout-17b-16e-instruct", "groq", "0.11", "0.34"),
-    _m("meta-llama/llama-4-maverick-17b-128e-instruct", "groq", "0.50", "0.77"),
+    # ---- AssemblyAI ------------------------------------------------------
+    _m(
+        "assemblyai-universal-3-5-pro",
+        "assemblyai",
+        "0",
+        "0",
+        notes="speech-to-text; billed at USD 0.21 per audio hour",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.0035",
+    ),
+    _m(
+        "assemblyai-universal-2",
+        "assemblyai",
+        "0",
+        "0",
+        notes="speech-to-text; billed at USD 0.15 per audio hour",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.0025",
+    ),
     # ---- Google Gemini --------------------------------------------------
-    _m(
-        "gemini-3-flash-preview",
-        "gemini",
-        "0.50",
-        "3.00",
-        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
-    ),
-    _m(
-        "gemini-3-pro-preview",
-        "gemini",
-        "2.00",
-        "12.00",
-        reasoning_efforts=GEMINI_3_PRO_REASONING_EFFORTS,
-    ),
-    _m("gemini-3-pro-image", "gemini", "2.00", "12.00"),
     _m(
         "gemini-3.1-flash-lite-preview",
         "gemini",
@@ -247,20 +329,46 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
     ),
     # ---- OpenRouter -----------------------------------------------------
-    _m("google/gemini-3-flash-preview", "openrouter", "0.50", "3.00"),
-    _m("google/gemini-3-pro-preview", "openrouter", "2.00", "12.00"),
     _m("google/gemini-3.1-flash-lite-preview", "openrouter", "0.25", "1.50"),
     _m("google/gemini-3.1-flash-image", "openrouter", "0.50", "3.00"),
     _m("google/gemini-3.1-pro-preview", "openrouter", "2.00", "12.00"),
     _m("google/gemini-3.5-flash", "openrouter", "1.50", "9.00"),
     _m("google/gemini-3.5-flash-lite", "openrouter", "0.30", "2.50"),
     _m("google/gemini-3.6-flash", "openrouter", "1.50", "7.50"),
-    _m("deepseek/deepseek-chat-v3.1", "openrouter", "0.28", "0.42"),
-    _m("deepseek/deepseek-r1-distill-qwen-7b", "openrouter", "0.55", "2.19"),
+    _m("anthropic/claude-sonnet-4.6", "openrouter", "3.00", "15.00"),
+    _m("x-ai/grok-4.5", "openrouter", "2.00", "6.00"),
+    _m(
+        "~anthropic/claude-sonnet-latest",
+        "openrouter",
+        "2.00",
+        "10.00",
+        notes="floating alias; prefer a pinned id",
+        supports_temperature=False,
+    ),
+    _m(
+        "~anthropic/claude-opus-latest",
+        "openrouter",
+        "5.00",
+        "25.00",
+        notes="floating alias; prefer a pinned id",
+    ),
+    _m(
+        "~deepseek/deepseek-v4-flash-latest",
+        "openrouter",
+        "0.09",
+        "0.18",
+        notes="floating alias; prefer a pinned id",
+    ),
+    _m(
+        "~moonshotai/kimi-latest",
+        "openrouter",
+        "2.90",
+        "14.00",
+        notes="floating alias; prefer a pinned id",
+    ),
+    _m("qwen/qwen3.8-max", "openrouter", "2.00", "6.00"),
     _m("deepseek/deepseek-v4-flash", "openrouter", "0.14", "0.28"),
     _m("deepseek/deepseek-v4-pro", "openrouter", "0.435", "0.87"),
-    _m("moonshotai/kimi-k2-thinking", "openrouter", "0.50", "1.50"),
-    _m("moonshotai/kimi-k2.6", "openrouter", "0.74", "3.49"),
 )
 
 MODEL_CATALOG: dict[str, ModelInfo] = {entry.id: entry for entry in _ENTRIES}
@@ -275,34 +383,19 @@ def models_by_provider(provider: Provider) -> tuple[ModelInfo, ...]:
     return tuple(m for m in MODEL_CATALOG.values() if m.provider == provider)
 
 
-# Prefix rules for models that are not (yet) catalogued. Order matters: the
-# `openai/` prefix belongs to Groq, so it must be tested before any generic
-# namespace rule sends it to OpenRouter.
-_PREFIX_RULES: tuple[tuple[str, Provider], ...] = (
-    ("openai/gpt-oss", "groq"),
-    ("models/gemini-3", "gemini"),
-    ("meta-llama/", "groq"),
-    ("gemini-3", "gemini"),
-    ("gpt-", "openai"),
-    ("chatgpt-", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("o4", "openai"),
-    ("llama", "groq"),
-    ("mixtral", "groq"),
-    ("gemma", "groq"),
-    ("qwen", "groq"),
-    ("kimi", "groq"),
-    ("groq/", "groq"),
-)
+# Only this provider-owned namespace is routable without a catalogue entry.
+# Model families and vendor namespaces are deliberately not inferred: Groq's
+# official list includes namespaced ids that also exist on OpenRouter.
+_EXPLICIT_PROVIDER_PREFIXES: tuple[tuple[str, Provider], ...] = (("openrouter/", "openrouter"),)
 
 
 def resolve_provider(model_id: str) -> Provider | None:
     """Which provider serves this model.
 
-    The catalogue is authoritative. Prefix rules only cover models released
-    after the catalogue was last updated; an id that matches nothing returns
-    ``None`` rather than being guessed into the wrong provider.
+    The catalogue is authoritative. An id that is not catalogued is only
+    accepted for the explicit ``openrouter/`` router namespace; every other
+    unknown id returns ``None`` rather than being guessed into the wrong
+    provider.
     """
     if _is_non_three_gemini_model(model_id):
         return None
@@ -311,14 +404,9 @@ def resolve_provider(model_id: str) -> Provider | None:
     if catalogued is not None:
         return catalogued.provider
 
-    lowered = model_id.lower()
-    for prefix, provider in _PREFIX_RULES:
-        if lowered.startswith(prefix):
+    for prefix, provider in _EXPLICIT_PROVIDER_PREFIXES:
+        if model_id.startswith(prefix):
             return provider
-
-    # A namespaced id that matched no rule is almost certainly an aggregator.
-    if "/" in lowered:
-        return "openrouter"
     return None
 
 
@@ -345,7 +433,11 @@ def builtin_price_catalog(
     yet. Supplying one without a ``version`` would make an amount
     unreconcilable, so pass a version that identifies *your* table.
     """
-    rates = {model_id: info.rate for model_id, info in MODEL_CATALOG.items()}
+    rates = {
+        model_id: info.rate
+        for model_id, info in MODEL_CATALOG.items()
+        if info.pricing_unit == "tokens"
+    }
     resolved_version = version or CATALOG_VERSION
 
     if overrides:
@@ -361,3 +453,13 @@ def builtin_price_catalog(
             )
 
     return StaticPriceCatalog(version=resolved_version, rates=rates)
+
+
+def builtin_audio_price_catalog(*, version: str | None = None) -> StaticAudioPriceCatalog:
+    """Build the duration-based catalogue, excluding every token model."""
+    rates = {
+        model_id: info.audio_rate
+        for model_id, info in MODEL_CATALOG.items()
+        if info.pricing_unit == "audio_minutes" and info.audio_usd_per_minute is not None
+    }
+    return StaticAudioPriceCatalog(version=version or CATALOG_VERSION, rates=rates)

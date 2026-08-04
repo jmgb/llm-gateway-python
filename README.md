@@ -69,9 +69,9 @@ uv add "neutral-llm-gateway[gemini]"
 pip install "neutral-llm-gateway[gemini]"
 ```
 
-Available extras: `openai`, `gemini`, `groq`, `openrouter`, `all`. Combine them
-as `[openai,gemini]`. `openrouter` installs the `openai` SDK, so `[all]` already
-covers it.
+Available extras: `openai`, `gemini`, `groq`, `assemblyai`, `openrouter`, `all`.
+Combine them as `[openai,assemblyai]`. `openrouter` installs the `openai` SDK,
+and `assemblyai` installs the small HTTP transport used by its REST adapter.
 
 Importing the package with no extra installed works by design; asking for a
 provider you have not installed raises a typed error naming the exact extra.
@@ -141,6 +141,40 @@ every attempt, with the parsing or schema error as its `__cause__`.
 Schema validation errors name each Pydantic `loc` and `type`, while dynamic
 response keys and values stay out of the message.
 
+### Transcription
+
+Speech-to-text is a separate operation with duration usage and audio pricing:
+
+```python
+from llm_gateway import AudioInput, LLMGateway, TranscriptionRequest
+from llm_gateway.factories import build_registry, create_openai_client
+
+gateway = LLMGateway(
+    registry=build_registry(openai_client=create_openai_client(api_key=my_key)),
+)
+transcript = await gateway.transcribe(
+    TranscriptionRequest(
+        model="gpt-transcribe",
+        audio=AudioInput(
+            data=audio_bytes,
+            filename="voice.webm",
+            mime_type="audio/webm",
+            duration_seconds=12.5,
+        ),
+        language="es",
+        source="voice-note",
+    )
+)
+
+transcript.text
+transcript.usage.duration_seconds
+transcript.cost.amount_usd  # audio minutes, never token pricing
+```
+
+Use `assemblyai-universal-3-5-pro` or `assemblyai-universal-2` with a public
+`AudioInput.url`, and `whisper-large-v3-turbo`/`whisper-large-v3` with Groq.
+Fallbacks are explicit through `FallbackPolicy.models_in_order(...)`.
+
 ## The guarantees
 
 These are enforced by tests, not by convention:
@@ -164,8 +198,8 @@ These are enforced by tests, not by convention:
 ## Extending
 
 Ports are optional and default to no-op: `UsageSink`, `EventSink`, `AlertSink`,
-`PriceCatalog`. Implement what you need; the package will not reach into your
-application to find them.
+`AudioUsageSink`, `PriceCatalog` and `AudioPriceCatalog`. Implement what you
+need; the package will not reach into your application to find them.
 
 Adding to the public API follows the **two-consumer rule**: nothing is promoted
 into the core until two distinct applications need it. Until then it belongs in
@@ -178,6 +212,7 @@ that application's local adapter.
 | OpenAI | `[openai]` | Responses API |
 | Google Gemini | `[gemini]` | `google-genai` async surface, not the retired `google-generativeai` |
 | Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the schema is described in the messages and the gateway validates after |
+| AssemblyAI | `[assemblyai]` | REST submit/poll transcription API |
 | OpenRouter | `[openrouter]` | Chat Completions. Aggregator: declares the floor every route honours, not the best case |
 
 Capabilities are declared per provider and never faked as identical — query
@@ -196,11 +231,12 @@ in the messages. Setting `response_format` is what creates the obligation, so
 the adapter meets it rather than the caller's prompt — and a prompt that already
 says "json" is left as it is.
 
-`function_calling`, `inline_files` and `remote_files` are declared `False` on
-every adapter, even where the provider supports them: this package's request
-contract has no way to ask for tools or attachments, so a `True` there would
-report a capability no caller can reach. They become `True` when the contract
-grows the fields, and a contract test keeps the two in step.
+`function_calling` and `inline_files` remain unsupported. OpenAI declares
+`remote_files=True`: `LLMRequest.attachments` accepts already-uploaded file IDs
+and the Responses adapter appends them to the last user message as
+`input_file` parts. Providers without that capability reject the request rather
+than silently dropping the files. OpenAI, Groq and AssemblyAI expose
+`audio_transcription=True` through the separate `TranscriptionRequest` API.
 
 Request options are adapted per model before each API attempt. A model that
 rejects `temperature` — the OpenAI 5.6 family — never receives it, including
@@ -234,12 +270,12 @@ registry = build_registry(
 )
 
 registry.resolve("gpt-5.6-luna")  # openai
-registry.resolve("deepseek/deepseek-chat-v3.1")  # openrouter, from the catalogue
-registry.resolve("somevendor/brand-new")  # openrouter, by the namespace rule
+registry.resolve("deepseek/deepseek-v4-pro")  # openrouter, from the catalogue
+registry.resolve("somevendor/brand-new")  # raises: not in the catalogue
 registry.resolve("openai/gpt-oss-120b")  # groq — the prefix is not OpenAI
 ```
 
-`gemini-3-pro-preview` and `google/gemini-3-pro-preview` are the same model on
+`gemini-3.1-pro-preview` and `google/gemini-3.1-pro-preview` are the same model on
 two routes, catalogued separately because they are billed separately.
 
 For any *other* OpenAI-compatible endpoint — Azure, vLLM, your own gateway —
@@ -250,15 +286,17 @@ pass `base_url` to `create_openai_client` and widen the routing with
 
 The package ships a versioned table of models — provider, and price in USD per
 million tokens — used by default, so a call is priced without you wiring
-anything up. Override it for negotiated rates, or implement `PriceCatalog`
-yourself. See [`docs/pricing.md`](docs/pricing.md).
+anything up. Audio models such as `gpt-transcribe`, Whisper and AssemblyAI are
+catalogued with their duration unit and priced through a separate
+`AudioPriceCatalog`. Override prices for negotiated rates, or implement either
+catalog protocol yourself. See
+[`docs/pricing.md`](docs/pricing.md).
 
 ## Not in this version
 
-Tools/function calling, file attachments, streaming and Gemini File Search are
-deliberately absent. Each is a real capability with its own cost and failure
-model, and adding one badly is worse than not having it. See `CHANGELOG.md` for
-the reasoning on each.
+Tools/function calling, inline files, streaming and Gemini File Search remain
+absent. Remote file IDs for OpenAI and audio transcription are supported with
+their own capability and cost contracts.
 
 ## Documentation
 
