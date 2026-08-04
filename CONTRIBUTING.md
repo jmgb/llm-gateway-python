@@ -21,8 +21,9 @@ One application's requirement is that application's adapter. A second real case
 is what makes a good general design possible — and what stops this package from
 slowly becoming the thousand-line function it was extracted from.
 
-If you need something only you need, the ports (`UsageSink`, `EventSink`,
-`AlertSink`, `PriceCatalog`) are there so you don't have to fork.
+If you need something only you need, the ports (`UsageSink`, `AudioUsageSink`,
+`EventSink`, `AlertSink`, `PriceCatalog`, `AudioPriceCatalog`) are there so you
+don't have to fork.
 
 ## Tooling
 
@@ -110,6 +111,11 @@ without the fix.
    stating where it reports thinking and what your adapter does about it. That
    table is the only place the agreement between adapters is written down; a
    test fails if a provider is missing from it.
+
+A transcription provider follows the same boundary: injected client, typed
+errors and honest capabilities. Its duration rate belongs in the audio table,
+and unsupported fields such as prompts or speaker labels must raise instead of
+being silently discarded.
 
 An OpenAI-compatible API is **not** on its own a reason to skip all this. It
 decides the transport, not the provider. Ask instead:

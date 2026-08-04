@@ -43,8 +43,8 @@ class TestIdentity:
             assert info.output_usd_per_mtok == Decimal(output_price)
             assert info.supports_temperature is supports_temperature
 
-    def test_removed_models_are_not_in_the_catalogue(self) -> None:
-        removed = {
+    def test_legacy_models_remain_routable_but_are_marked_deprecated(self) -> None:
+        legacy = {
             "gemini-3-flash-preview",
             "gemini-3-pro-preview",
             "gemini-3-pro-image",
@@ -64,7 +64,8 @@ class TestIdentity:
             "gpt-realtime-1.5-2026-02-25",
         }
 
-        assert removed.isdisjoint(MODEL_CATALOG)
+        assert legacy <= MODEL_CATALOG.keys()
+        assert all(MODEL_CATALOG[model_id].deprecated for model_id in legacy)
 
     def test_current_openai_audio_models_use_their_current_ids(self) -> None:
         expected = {
@@ -82,19 +83,28 @@ class TestIdentity:
 
     def test_assemblyai_and_groq_whisper_models_are_catalogued_as_audio(self) -> None:
         expected = {
-            "assemblyai-universal-3-5-pro": ("assemblyai", "0.0035"),
-            "assemblyai-universal-2": ("assemblyai", "0.0025"),
-            "whisper-large-v3-turbo": ("groq", "0.0006666666666666666666666667"),
-            "whisper-large-v3": ("groq", "0.00185"),
-            "distil-whisper-large-v3-en": ("groq", "0.0003333333333333333333333333"),
+            "assemblyai-universal-3-pro": ("assemblyai", "0.0035", False),
+            "assemblyai-universal-2": ("assemblyai", "0.0025", False),
+            "whisper-large-v3-turbo": (
+                "groq",
+                "0.0006666666666666666666666667",
+                False,
+            ),
+            "whisper-large-v3": ("groq", "0.00185", False),
+            "distil-whisper-large-v3-en": (
+                "groq",
+                "0.0003333333333333333333333333",
+                True,
+            ),
         }
 
-        for model_id, (provider, rate) in expected.items():
+        for model_id, (provider, rate, deprecated) in expected.items():
             info = lookup_model(model_id)
             assert info is not None
             assert info.provider == provider
             assert info.pricing_unit == "audio_minutes"
             assert info.audio_usd_per_minute == Decimal(rate)
+            assert info.deprecated is deprecated
 
     def test_a_known_model_reports_its_provider(self) -> None:
         gemini = lookup_model("gemini-3.5-flash-lite")
@@ -328,8 +338,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-04.4"
-    PRICE_FINGERPRINT = "6d717c63f3373d313a2a492a655d1c00d332857abfadc39168e6667fac0f8424"
+    PRICED_AT_VERSION = "2026-08-04.5"
+    PRICE_FINGERPRINT = "5558060fe5cc43e012ed838e819a3b9c0e8a0e97e7a65618c59a3ef82119aafe"
 
     @staticmethod
     def _fingerprint() -> str:

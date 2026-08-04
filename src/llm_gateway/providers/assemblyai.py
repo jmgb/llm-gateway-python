@@ -12,13 +12,14 @@ from llm_gateway.audio import (
 )
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest
-from llm_gateway.errors import ConfigurationError
+from llm_gateway.errors import ConfigurationError, LLMGatewayError, ProviderError
 from llm_gateway.providers.base import ProviderResponse
+from llm_gateway.providers.error_mapping import classify_provider_error
 
 CAPABILITIES = ProviderCapabilities(audio_transcription=True)
 
 _MODEL_TO_SPEECH_MODEL = {
-    "assemblyai-universal-3-5-pro": "universal-3-5-pro",
+    "assemblyai-universal-3-pro": "universal-3-pro",
     "assemblyai-universal-2": "universal-2",
 }
 
@@ -83,6 +84,8 @@ class AssemblyAIAdapter:
             raise ConfigurationError(f"unsupported AssemblyAI transcription model: {model}")
         if request.audio.url is None:
             raise ConfigurationError("AssemblyAI transcription requires a public audio URL")
+        if request.prompt is not None and speech_model != "universal-3-pro":
+            raise ConfigurationError("AssemblyAI Universal-2 does not support a prompt")
 
         payload: dict[str, Any] = {
             "audio_url": request.audio.url,
@@ -91,27 +94,35 @@ class AssemblyAIAdapter:
         }
         if request.language is not None:
             payload["language_code"] = request.language
-        submitted = await self._client.post("/transcript", json=payload)
-        transcript_id = submitted.get("id")
-        if not isinstance(transcript_id, str) or not transcript_id:
-            raise ValueError("AssemblyAI did not return a transcript id")
+        if request.prompt is not None:
+            payload["prompt"] = request.prompt
 
-        for attempt in range(self._max_poll_attempts):
-            result = await self._client.get(f"/transcript/{transcript_id}")
-            status = result.get("status")
-            if status == "completed":
-                return normalize_provider_transcription(
-                    result,
-                    request=request,
-                    model=model,
-                    utterances_are_milliseconds=True,
-                )
-            if status == "error":
-                raise ValueError("AssemblyAI transcription failed")
-            if attempt + 1 < self._max_poll_attempts:
-                await asyncio.sleep(self._poll_interval_seconds)
+        try:
+            submitted = await self._client.post("/transcript", json=payload)
+            transcript_id = submitted.get("id")
+            if not isinstance(transcript_id, str) or not transcript_id:
+                raise ProviderError("AssemblyAI returned no transcript id")
 
-        raise TimeoutError("AssemblyAI transcription polling timed out")
+            for attempt in range(self._max_poll_attempts):
+                result = await self._client.get(f"/transcript/{transcript_id}")
+                status = result.get("status")
+                if status == "completed":
+                    return normalize_provider_transcription(
+                        result,
+                        request=request,
+                        model=model,
+                        utterances_are_milliseconds=True,
+                    )
+                if status == "error":
+                    raise ProviderError("AssemblyAI transcription failed")
+                if attempt + 1 < self._max_poll_attempts:
+                    await asyncio.sleep(self._poll_interval_seconds)
+
+            raise TimeoutError("AssemblyAI transcription polling timed out")
+        except LLMGatewayError:
+            raise
+        except Exception as error:
+            raise classify_provider_error(error) from None
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         raise ConfigurationError("AssemblyAI only supports transcription requests")

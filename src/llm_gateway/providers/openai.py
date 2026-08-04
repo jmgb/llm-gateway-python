@@ -71,16 +71,25 @@ class OpenAIAdapter:
     ) -> ProviderTranscriptionResponse:
         if request.audio.data is None:
             raise ConfigurationError("OpenAI transcription requires audio bytes")
+        if request.speaker_labels:
+            raise ConfigurationError("OpenAI gpt-transcribe does not support speaker labels")
         kwargs: dict[str, Any] = {
             "model": model,
-            "file": (request.audio.filename, request.audio.data),
+            "file": (
+                (request.audio.filename, request.audio.data, request.audio.mime_type)
+                if request.audio.mime_type is not None
+                else (request.audio.filename, request.audio.data)
+            ),
             # The current gpt-transcribe endpoint is an API-backed model
             # alias and accepts json/text, not the Whisper-only verbose_json
             # format. Keep verbose_json for other OpenAI transcription ids.
             "response_format": "json" if model == "gpt-transcribe" else "verbose_json",
         }
         if request.language is not None:
-            kwargs["language"] = request.language
+            if model == "gpt-transcribe":
+                kwargs["languages"] = [request.language]
+            else:
+                kwargs["language"] = request.language
         if request.prompt:
             kwargs["prompt"] = request.prompt
         try:

@@ -1,9 +1,6 @@
-"""Optional convenience for building a registry.
+"""Optional convenience for building a registry."""
 
-The extras are not installed in this environment, which is exactly what makes
-these tests meaningful: they prove the failure is a readable instruction and
-not an ImportError traceback.
-"""
+import sys
 
 import pytest
 
@@ -25,14 +22,19 @@ class FakeAdapter:
         raise AssertionError("registration never calls the adapter")
 
 
-def test_a_missing_extra_names_the_install_command() -> None:
+def test_a_missing_extra_names_the_install_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", None)
+
     with pytest.raises(ProviderNotInstalled, match=r"neutral-llm-gateway\[openai\]"):
         create_openai_client(api_key="unused")
 
 
-def test_each_provider_names_its_own_extra() -> None:
+def test_each_provider_names_its_own_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "google", None)
     with pytest.raises(ProviderNotInstalled, match=r"\[gemini\]"):
         create_gemini_client(api_key="unused")
+
+    monkeypatch.setitem(sys.modules, "groq", None)
     with pytest.raises(ProviderNotInstalled, match=r"\[groq\]"):
         create_groq_client(api_key="unused")
 
@@ -43,8 +45,21 @@ def test_assemblyai_client_is_constructed_from_an_explicit_key() -> None:
     assert client._headers == {"Authorization": "assembly-key"}
 
 
-def test_openrouter_names_its_own_extra_even_though_it_ships_no_sdk() -> None:
+def test_a_missing_assemblyai_transport_names_its_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "httpx", None)
+
+    with pytest.raises(ProviderNotInstalled, match=r"\[assemblyai\]"):
+        create_assemblyai_client(api_key="unused")
+
+
+def test_openrouter_names_its_own_extra_even_though_it_ships_no_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """It installs `openai`, but the extra a consumer asked for is its own."""
+    monkeypatch.setitem(sys.modules, "openai", None)
+
     with pytest.raises(ProviderNotInstalled, match=r"\[openrouter\]"):
         create_openrouter_client(api_key="unused")
 

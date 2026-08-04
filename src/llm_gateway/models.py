@@ -38,7 +38,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ModelRate, StaticAudioPriceCatalog, StaticPriceCatalog
 
-CATALOG_VERSION = "2026-08-04.4"
+CATALOG_VERSION = "2026-08-04.5"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -144,6 +144,8 @@ def _m(
 
 _ENTRIES: tuple[ModelInfo, ...] = (
     # ---- OpenAI ---------------------------------------------------------
+    _m("gpt-5.1-2025-11-13", "openai", "1.25", "10.00", deprecated=True),
+    _m("gpt-5.2-2025-12-11", "openai", "1.75", "14.00", deprecated=True),
     # The 5.6 family rejects `temperature`: reasoning replaces it, and sending
     # it fails the whole call. A fallback onto one of these must not inherit it.
     _m(
@@ -173,6 +175,10 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     ),
     _m("gpt-realtime-2.1", "openai", "32.00", "64.00", notes="realtime audio"),
     _m("gpt-realtime-2.1-mini", "openai", "10.00", "20.00", notes="realtime audio"),
+    _m("gpt-realtime-2025-08-28", "openai", "32.00", "64.00", deprecated=True),
+    _m("gpt-realtime-mini-2025-10-06", "openai", "10.00", "20.00", deprecated=True),
+    _m("gpt-realtime-mini-2025-12-15", "openai", "10.00", "20.00", deprecated=True),
+    _m("gpt-realtime-1.5-2026-02-25", "openai", "32.00", "64.00", deprecated=True),
     _m(
         "gpt-transcribe",
         "openai",
@@ -212,6 +218,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "0",
         "0",
         notes="English-only Whisper speech-to-text; billed at USD 0.02 per audio hour",
+        deprecated=True,
         supports_temperature=False,
         pricing_unit="audio_minutes",
         audio_price_per_minute="0.0003333333333333333333333333",
@@ -233,9 +240,11 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         notes="the openai/ prefix is not OpenAI",
         reasoning_efforts=GROQ_GPT_OSS_REASONING_EFFORTS,
     ),
+    _m("meta-llama/llama-4-scout-17b-16e-instruct", "groq", "0.11", "0.34", deprecated=True),
+    _m("meta-llama/llama-4-maverick-17b-128e-instruct", "groq", "0.50", "0.77", deprecated=True),
     # ---- AssemblyAI ------------------------------------------------------
     _m(
-        "assemblyai-universal-3-5-pro",
+        "assemblyai-universal-3-pro",
         "assemblyai",
         "0",
         "0",
@@ -255,6 +264,23 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         audio_price_per_minute="0.0025",
     ),
     # ---- Google Gemini --------------------------------------------------
+    _m(
+        "gemini-3-flash-preview",
+        "gemini",
+        "0.50",
+        "3.00",
+        deprecated=True,
+        reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
+    ),
+    _m(
+        "gemini-3-pro-preview",
+        "gemini",
+        "2.00",
+        "12.00",
+        deprecated=True,
+        reasoning_efforts=GEMINI_3_PRO_REASONING_EFFORTS,
+    ),
+    _m("gemini-3-pro-image", "gemini", "2.00", "12.00", deprecated=True),
     _m(
         "gemini-3.1-flash-lite-preview",
         "gemini",
@@ -319,6 +345,8 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
     ),
     # ---- OpenRouter -----------------------------------------------------
+    _m("google/gemini-3-flash-preview", "openrouter", "0.50", "3.00", deprecated=True),
+    _m("google/gemini-3-pro-preview", "openrouter", "2.00", "12.00", deprecated=True),
     _m("google/gemini-3.1-flash-lite-preview", "openrouter", "0.25", "1.50"),
     _m("google/gemini-3.1-flash-image", "openrouter", "0.50", "3.00"),
     _m("google/gemini-3.1-pro-preview", "openrouter", "2.00", "12.00"),
@@ -357,8 +385,18 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         notes="floating alias; prefer a pinned id",
     ),
     _m("qwen/qwen3.8-max", "openrouter", "2.00", "6.00"),
+    _m("deepseek/deepseek-chat-v3.1", "openrouter", "0.28", "0.42", deprecated=True),
+    _m(
+        "deepseek/deepseek-r1-distill-qwen-7b",
+        "openrouter",
+        "0.55",
+        "2.19",
+        deprecated=True,
+    ),
     _m("deepseek/deepseek-v4-flash", "openrouter", "0.14", "0.28"),
     _m("deepseek/deepseek-v4-pro", "openrouter", "0.435", "0.87"),
+    _m("moonshotai/kimi-k2-thinking", "openrouter", "0.50", "1.50", deprecated=True),
+    _m("moonshotai/kimi-k2.6", "openrouter", "0.74", "3.49", deprecated=True),
 )
 
 MODEL_CATALOG: dict[str, ModelInfo] = {entry.id: entry for entry in _ENTRIES}

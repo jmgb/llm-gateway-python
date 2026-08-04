@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from llm_gateway import (
     FallbackPolicy,
+    FileAttachment,
     LLMGateway,
     LLMRequest,
     Message,
@@ -12,6 +13,12 @@ from llm_gateway import (
     RateLimitedError,
     TokenUsage,
 )
+
+
+def test_a_remote_attachment_only_keeps_the_provider_file_id() -> None:
+    attachment = FileAttachment("file-1")
+
+    assert not hasattr(attachment, "mime_type")
 
 
 class RecordingAdapter:

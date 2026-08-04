@@ -145,6 +145,22 @@ class AudioGateway:
                     f"transcription attempt exceeded {request.timeout_policy.per_attempt_seconds}s"
                 )
                 failure.__cause__ = error
+            except asyncio.CancelledError:
+                attempts.append(
+                    _record_attempt(
+                        index=len(attempts) + 1,
+                        model=model,
+                        provider=adapter.name,
+                        outcome="failed",
+                        usage=AudioUsage.unknown(),
+                        cost=AudioCost.unavailable(pricing_version=self._prices.version),
+                        started=attempt_started,
+                        error_type=ProviderTimeoutError.__name__,
+                        billable=True,
+                        failure_phase=FailurePhase.TIMEOUT,
+                    )
+                )
+                raise
             except LLMGatewayError as error:
                 failure = error
             else:

@@ -11,11 +11,13 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Changed
 
-- Updated the model catalogue to remove the requested legacy Gemini, DeepSeek,
-  Groq Llama and GPT-5.1/5.2 identifiers.
-- Replaced the legacy realtime identifiers with `gpt-realtime-2.1` and
-  `gpt-realtime-2.1-mini`, and removed the duplicate older mini entry.
-- Removed the obsolete OpenRouter entries for Gemini 3 preview and Kimi K2.
+- Updated the model catalogue and marked the requested legacy Gemini, DeepSeek,
+  Groq Llama and GPT-5.1/5.2 identifiers as deprecated. They remain routable so
+  existing consumers do not break during an upgrade.
+- Added `gpt-realtime-2.1` and `gpt-realtime-2.1-mini`, and marked the older
+  realtime identifiers as deprecated.
+- Marked the obsolete OpenRouter entries for Gemini 3 preview and Kimi K2 as
+  deprecated instead of deleting them.
 - Removed provider-family and namespace guesses from fallback routing. Unknown
   models now require an explicit catalogue entry or consumer-supplied prefix.
 
@@ -35,6 +37,22 @@ consumer pins an immutable tag and upgrades through its own pull request.
 - Added seven current OpenRouter entries: Claude Sonnet 4.6, Grok 4.5, the
   Sonnet and Opus latest aliases, the DeepSeek V4 Flash and MoonshotAI Kimi
   latest aliases, and Qwen3.8 Max.
+
+### Fixed
+
+- OpenAI `gpt-transcribe` now sends its language hint through the required
+  plural `languages` field and reads provider duration from `usage.seconds`.
+  Caller-supplied duration remains usable as an explicit estimate, never an
+  actual provider measurement.
+- AssemblyAI now uses the published `universal-3-pro` model identifier, sends
+  its supported prompt, and maps HTTP, polling and malformed-response failures
+  to typed gateway errors so retry and fallback remain available.
+- OpenAI and Groq reject unsupported speaker labels instead of silently
+  dropping them, and uploaded audio preserves its MIME type.
+- A total timeout now records the provider attempt it interrupted, keeping a
+  potentially billable call visible in failure accounting.
+- Optional-extra tests now simulate missing SDKs explicitly and pass whether
+  or not another development dependency installed the same transport.
 
 ## [0.9.0] — 2026-07-31
 

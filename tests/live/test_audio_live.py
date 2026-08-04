@@ -47,7 +47,7 @@ class _ProviderCase:
 _CASES = (
     _ProviderCase("openai", "OPENAI_API_KEY", "gpt-transcribe"),
     _ProviderCase("groq", "GROQ_API_KEY", "whisper-large-v3-turbo"),
-    _ProviderCase("assemblyai", "ASSEMBLYAI_API_KEY", "assemblyai-universal-2"),
+    _ProviderCase("assemblyai", "ASSEMBLYAI_API_KEY", "assemblyai-universal-3-pro"),
 )
 _DEFAULT_AUDIO_DURATION_SECONDS = 50.56
 

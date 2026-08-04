@@ -148,6 +148,9 @@ The built-in catalogue currently includes:
 | Groq Whisper | `$0.02`–`$0.111` / hour | 10 seconds |
 | AssemblyAI Universal | `$0.15`–`$0.21` / hour | none |
 
-Missing duration is `UNAVAILABLE`, never zero. Audio retries and fallbacks are
+A provider-reported duration produces an `ACTUAL` amount. When the provider
+omits duration but the caller supplied `AudioInput.duration_seconds`, the
+amount is an `ESTIMATED` lower-confidence figure. If neither source has a
+duration, cost is `UNAVAILABLE`, never zero. Audio retries and fallbacks are
 represented by `AudioAttempt`/`AudioExecution`; their cost never enters token
 usage or token fallback pricing.

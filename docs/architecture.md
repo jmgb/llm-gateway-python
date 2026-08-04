@@ -70,6 +70,11 @@ LLMGateway.transcribe()        ← audio retries, fallback and duration cost
     └── AudioProviderAdapter.transcribe()
 ```
 
+Provider-reported audio duration is actual usage. Caller-supplied duration is
+kept as an estimate when a provider omits usage, and a missing duration remains
+unknown. Provider adapters must reject unsupported transcription options rather
+than silently dropping them.
+
 Adapters are deliberately dumb. They do not retry, do not fall back, do not
 price and do not aggregate. Every one of those, done once per provider, is how
 the original file reached two thousand lines.

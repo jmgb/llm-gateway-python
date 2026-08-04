@@ -35,7 +35,6 @@ class FileAttachment:
     """An already-uploaded remote file referenced by provider id."""
 
     file_id: str
-    mime_type: str | None = None
 
     def __post_init__(self) -> None:
         if not self.file_id.strip():

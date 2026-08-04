@@ -53,7 +53,7 @@ class TranscriptionRequest:
 
     model: str
     audio: AudioInput
-    language: str | None = "es"
+    language: str | None = None
     prompt: str | None = None
     speaker_labels: bool = False
     timeout_policy: TimeoutPolicy = field(default_factory=TimeoutPolicy)
@@ -159,7 +159,12 @@ def normalize_provider_transcription(
     text = raw if isinstance(raw, str) else (_value(raw, "text", "") or "")
     duration = _value(raw, "duration")
     if duration is None:
-        duration = _value(raw, "audio_duration", request.audio.duration_seconds)
+        duration = _value(raw, "audio_duration")
+    if duration is None:
+        duration = _value(_value(raw, "usage"), "seconds")
+    estimated = duration is None and request.audio.duration_seconds is not None
+    if estimated:
+        duration = request.audio.duration_seconds
     raw_segments = _value(raw, "segments") or _value(raw, "utterances") or ()
     segments = tuple(
         AudioSegment(
@@ -172,9 +177,12 @@ def normalize_provider_transcription(
     )
     return ProviderTranscriptionResponse(
         text=str(text),
-        usage=AudioUsage(duration_seconds=_as_float(duration)),
+        usage=AudioUsage(
+            duration_seconds=_as_float(duration),
+            partial_aggregate=estimated,
+        ),
         segments=segments,
-        language=_value(raw, "language") or _value(raw, "language_code") or request.language,
+        language=_transcription_language(raw) or request.language,
         model_used=_value(raw, "model") or model,
     )
 
@@ -186,3 +194,13 @@ def _seconds(value: Any, milliseconds: bool) -> float:
 
 def _as_float(value: Any) -> float | None:
     return float(value) if value is not None else None
+
+
+def _transcription_language(raw: Any) -> str | None:
+    direct = _value(raw, "language") or _value(raw, "language_code")
+    if direct is not None:
+        return str(direct)
+    languages = _value(raw, "languages") or ()
+    first = languages[0] if languages else None
+    code = _value(first, "code")
+    return str(code) if code is not None else None

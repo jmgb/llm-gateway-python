@@ -118,7 +118,7 @@ class TestOpenAIAdapter:
         await OpenAIAdapter(self._client(recorder)).generate(
             _request(
                 attachments=(
-                    FileAttachment("file-audio-1", mime_type="audio/ogg"),
+                    FileAttachment("file-audio-1"),
                     FileAttachment("file-audio-2"),
                 )
             ),

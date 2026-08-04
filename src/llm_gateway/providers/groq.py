@@ -77,6 +77,8 @@ class GroqAdapter:
     async def transcribe(
         self, request: TranscriptionRequest, *, model: str
     ) -> ProviderTranscriptionResponse:
+        if request.speaker_labels:
+            raise ConfigurationError("Groq transcription does not support speaker labels")
         kwargs: dict[str, Any] = {
             "model": model,
             "response_format": "verbose_json",
@@ -85,7 +87,11 @@ class GroqAdapter:
         if request.audio.url is not None:
             kwargs["url"] = request.audio.url
         elif request.audio.data is not None:
-            kwargs["file"] = (request.audio.filename, request.audio.data)
+            kwargs["file"] = (
+                (request.audio.filename, request.audio.data, request.audio.mime_type)
+                if request.audio.mime_type is not None
+                else (request.audio.filename, request.audio.data)
+            )
         else:
             raise ConfigurationError("Groq transcription requires audio bytes or a URL")
         if request.language is not None:

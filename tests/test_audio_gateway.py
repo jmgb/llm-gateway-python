@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import pytest
@@ -12,6 +13,7 @@ from llm_gateway import (
     AudioRate,
     AudioUsage,
     AudioUsageRecord,
+    FailurePhase,
     FallbackPolicy,
     LLMGateway,
     LLMRequest,
@@ -20,6 +22,7 @@ from llm_gateway import (
     ProviderTranscriptionResponse,
     RateLimitedError,
     StaticAudioPriceCatalog,
+    TimeoutPolicy,
     TokenUsage,
     TranscriptionRequest,
 )
@@ -136,3 +139,30 @@ async def test_a_token_model_cannot_enter_the_transcription_path() -> None:
         )
 
     assert adapter.requests == []
+
+
+async def test_total_timeout_records_the_provider_attempt_it_interrupts() -> None:
+    class SlowAdapter(RecordingAudioAdapter):
+        async def transcribe(
+            self, request: TranscriptionRequest, *, model: str
+        ) -> ProviderTranscriptionResponse:
+            self.requests.append(request)
+            await asyncio.sleep(1)
+            raise AssertionError("the total timeout should interrupt the provider call")
+
+    adapter = SlowAdapter("openai")
+
+    with pytest.raises(AllTranscriptionsFailed) as raised:
+        await _gateway(adapter).transcribe(
+            _request(
+                timeout_policy=TimeoutPolicy(
+                    total_seconds=0.02,
+                    per_attempt_seconds_override=1,
+                )
+            )
+        )
+
+    assert len(raised.value.attempts) == 1
+    attempt = raised.value.attempts[0]
+    assert attempt.failure_phase is FailurePhase.TIMEOUT
+    assert attempt.billable is True

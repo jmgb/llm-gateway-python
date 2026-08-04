@@ -48,3 +48,9 @@ def test_audio_input_can_keep_bytes_and_url_for_cross_provider_fallbacks() -> No
 
     assert audio.data == b"audio"
     assert audio.url == "https://storage.example/voice.m4a"
+
+
+def test_transcription_does_not_assume_a_product_language() -> None:
+    request = TranscriptionRequest(model="gpt-transcribe", audio=AudioInput(data=b"audio"))
+
+    assert request.language is None

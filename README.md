@@ -171,9 +171,12 @@ transcript.usage.duration_seconds
 transcript.cost.amount_usd  # audio minutes, never token pricing
 ```
 
-Use `assemblyai-universal-3-5-pro` or `assemblyai-universal-2` with a public
+`language` is optional and defaults to provider detection. Use
+`assemblyai-universal-3-pro` or `assemblyai-universal-2` with a public
 `AudioInput.url`, and `whisper-large-v3-turbo`/`whisper-large-v3` with Groq.
-Fallbacks are explicit through `FallbackPolicy.models_in_order(...)`.
+AssemblyAI Universal-3 Pro supports `prompt` and speaker labels; OpenAI and
+Groq reject speaker labels rather than ignoring them. Fallbacks are explicit
+through `FallbackPolicy.models_in_order(...)`.
 
 ## The guarantees
 

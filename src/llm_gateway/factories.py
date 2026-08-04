@@ -36,8 +36,8 @@ GROQ_MODEL_PREFIXES = (
 )
 OPENROUTER_MODEL_PREFIXES = ("openrouter/",)
 """Deliberately short. OpenRouter's catalogued models route by their declared
-provider, and any other ``vendor/model`` id reaches it through the namespace
-rule in :mod:`llm_gateway.models` — so only OpenRouter's own ids need listing."""
+provider, while uncatalogued vendor namespaces are rejected. Only OpenRouter's
+own provider-prefixed ids need a fallback prefix."""
 ASSEMBLYAI_MODEL_PREFIXES = ("assemblyai-",)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -104,6 +104,10 @@ def create_groq_client(*, api_key: str) -> Any:
 def create_assemblyai_client(*, api_key: str) -> Any:
     """Build the small REST client used by the AssemblyAI adapter."""
     _require_key(api_key)
+    try:
+        __import__("httpx")
+    except ImportError as error:
+        raise ProviderNotInstalled.for_provider("assemblyai") from error
     return AssemblyAIHttpClient(api_key=api_key)
 
 
