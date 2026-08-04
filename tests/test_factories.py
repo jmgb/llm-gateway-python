@@ -1,6 +1,7 @@
 """Optional convenience for building a registry."""
 
 import sys
+from types import ModuleType
 
 import pytest
 
@@ -39,7 +40,11 @@ def test_each_provider_names_its_own_extra(monkeypatch: pytest.MonkeyPatch) -> N
         create_groq_client(api_key="unused")
 
 
-def test_assemblyai_client_is_constructed_from_an_explicit_key() -> None:
+def test_assemblyai_client_is_constructed_from_an_explicit_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "httpx", ModuleType("httpx"))
+
     client = create_assemblyai_client(api_key="assembly-key")
 
     assert client._headers == {"Authorization": "assembly-key"}

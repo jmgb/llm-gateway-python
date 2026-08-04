@@ -9,6 +9,12 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- CI now keeps each matrix job on its requested Python version and verifies the
+  interpreter before running checks. The AssemblyAI factory test also supplies
+  its own fake optional transport, so the no-extras job is deterministic.
+
 ## [0.10.0] — 2026-08-04
 
 ### Changed

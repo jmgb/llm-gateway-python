@@ -18,9 +18,6 @@ jobs:
         # The supported floor and the current stable release.
         python-version: ["3.11", "3.13"]
 
-    env:
-      PYTHON_VERSION: ${{ matrix.python-version }}
-
     steps:
       - uses: actions/checkout@v5
 
@@ -28,9 +25,16 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          python-version: ${{ matrix.python-version }}
 
       - name: Sync (no provider extras, on purpose)
-        run: uv sync --locked --python "$PYTHON_VERSION"
+        run: uv sync --locked
+
+      - name: Verify Python version
+        run: >-
+          uv run python -c
+          'import os, sys; expected = tuple(map(int, os.environ["UV_PYTHON"].split(".")));
+          assert sys.version_info[:2] == expected, (sys.version, expected)'
 
       - name: Lint
         run: uv run ruff check .
