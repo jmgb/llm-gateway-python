@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-04
+
 ### Changed
 
 - Updated the model catalogue and marked the requested legacy Gemini, DeepSeek,
