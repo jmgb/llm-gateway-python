@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-08-04
+
 ### Fixed
 
 - CI now keeps each matrix job on its requested Python version and verifies the
