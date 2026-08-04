@@ -14,8 +14,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from llm_gateway.audio import (
+    ProviderTranscriptionResponse,
+    TranscriptionRequest,
+    normalize_provider_transcription,
+)
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
+from llm_gateway.errors import ConfigurationError
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.strict_schema import strict_json_schema
@@ -29,7 +35,8 @@ CAPABILITIES = ProviderCapabilities(
     # as available while answering nothing. Declared when the contract grows.
     function_calling=False,
     inline_files=False,
-    remote_files=False,
+    remote_files=True,
+    audio_transcription=True,
     reasoning_effort=True,
     conversation_history=True,
     reports_token_usage=True,
@@ -59,6 +66,29 @@ class OpenAIAdapter:
             model_used=getattr(raw, "model", None),
         )
 
+    async def transcribe(
+        self, request: TranscriptionRequest, *, model: str
+    ) -> ProviderTranscriptionResponse:
+        if request.audio.data is None:
+            raise ConfigurationError("OpenAI transcription requires audio bytes")
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "file": (request.audio.filename, request.audio.data),
+            # The current gpt-transcribe endpoint is an API-backed model
+            # alias and accepts json/text, not the Whisper-only verbose_json
+            # format. Keep verbose_json for other OpenAI transcription ids.
+            "response_format": "json" if model == "gpt-transcribe" else "verbose_json",
+        }
+        if request.language is not None:
+            kwargs["language"] = request.language
+        if request.prompt:
+            kwargs["prompt"] = request.prompt
+        try:
+            raw = await self._client.audio.transcriptions.create(**kwargs)
+        except Exception as error:
+            raise classify_provider_error(error) from None
+        return normalize_provider_transcription(raw, request=request, model=model)
+
     def _build_kwargs(self, request: LLMRequest, *, model: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"model": model, "input": self._build_input(request)}
         if request.temperature is not None:
@@ -85,7 +115,7 @@ class OpenAIAdapter:
             }
         return kwargs
 
-    def _build_input(self, request: LLMRequest) -> list[dict[str, str]]:
+    def _build_input(self, request: LLMRequest) -> list[dict[str, Any]]:
         """Carry the system prompt as a message rather than as ``instructions``.
 
         ``json_object`` mode is rejected unless the word "json" appears in the
@@ -93,10 +123,21 @@ class OpenAIAdapter:
         that asks for JSON would therefore be invisible to that check. Sending
         it as a message also matches the arrangement Chat Completions used.
         """
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
         if request.system_prompt:
             messages.append({"role": "system", "content": request.system_prompt})
         messages.extend({"role": m.role, "content": m.content} for m in request.messages)
+        if request.attachments:
+            for message in reversed(messages):
+                if message["role"] != "user":
+                    continue
+                text = message["content"]
+                message["content"] = [{"type": "input_text", "text": text}]
+                message["content"].extend(
+                    {"type": "input_file", "file_id": attachment.file_id}
+                    for attachment in request.attachments
+                )
+                break
         return messages
 
 

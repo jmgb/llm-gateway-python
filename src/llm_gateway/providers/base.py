@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from llm_gateway.audio import ProviderTranscriptionResponse, TranscriptionRequest
 from llm_gateway.contracts import LLMRequest
 from llm_gateway.usage import TokenUsage
 
@@ -33,4 +34,17 @@ class ProviderAdapter(Protocol):
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         """Perform exactly one call. Raise a typed error; never return one."""
+        ...
+
+
+@runtime_checkable
+class AudioProviderAdapter(Protocol):
+    """Provider adapter capable of speech-to-text."""
+
+    name: str
+
+    async def transcribe(
+        self, request: TranscriptionRequest, *, model: str
+    ) -> ProviderTranscriptionResponse:
+        """Perform exactly one transcription call."""
         ...

@@ -18,8 +18,8 @@ Provider-shaped code moved here. Product-shaped code stayed in the application.
 | Concern | Where it lives | Why |
 |---|---|---|
 | Calling an SDK, mapping its response | `providers/` | Changes with the provider |
-| Retry, fallback, attempt accounting | `gateway.py` | Same logic for every provider; divergence is the bug |
-| Token and cost arithmetic | `usage.py`, `pricing.py` | Same maths everywhere; prices are injected |
+| Retry, fallback, attempt accounting | `gateway.py`, `audio_gateway.py` | Same policy shape, separate token/audio accounting |
+| Token and audio cost arithmetic | `usage.py`, `pricing.py`, `models.py` | Separate usage/cost types prevent duration becoming tokens |
 | JSON recovery | `json_payload.py` | A provider-shaped problem |
 | Deciding whether an answer is usable | `gateway.py` | It decides whether the attempt failed, so it cannot sit after the attempt |
 | Adapting a request to the target model | `gateway.py`, `models.py` | A fallback inherits a request written for another model |
@@ -61,6 +61,13 @@ ProviderAdapter.generate()     ← one call, one translation, no policy
     │
     ▼
 provider SDK
+
+TranscriptionRequest
+    │
+    ▼
+LLMGateway.transcribe()        ← audio retries, fallback and duration cost
+    │
+    └── AudioProviderAdapter.transcribe()
 ```
 
 Adapters are deliberately dumb. They do not retry, do not fall back, do not

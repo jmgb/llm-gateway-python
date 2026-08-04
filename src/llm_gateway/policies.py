@@ -86,6 +86,11 @@ class FallbackPolicy:
             raise ValueError(
                 f"{model!r} is not in the catalogue, so no fallback can be derived from it"
             )
+        if current.pricing_unit != "tokens":
+            raise ValueError(
+                f"{model!r} uses {current.pricing_unit} pricing, "
+                "so no token fallback can be derived"
+            )
 
         def total_price(candidate: object) -> Decimal:
             info = cast("ModelInfo", candidate)
@@ -94,7 +99,8 @@ class FallbackPolicy:
         cheaper = [
             candidate
             for candidate in models_by_provider(current.provider)
-            if not candidate.deprecated
+            if candidate.pricing_unit == "tokens"
+            and not candidate.deprecated
             and candidate.id != current.id
             and total_price(candidate) < total_price(current)
         ]

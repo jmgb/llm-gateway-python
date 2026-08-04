@@ -13,11 +13,14 @@ from typing import Any
 import pytest
 
 from llm_gateway import (
+    ConfigurationError,
+    FileAttachment,
     LLMRequest,
     Message,
     RateLimitedError,
     ResponseFormat,
 )
+from llm_gateway.providers.assemblyai import AssemblyAIAdapter
 from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
@@ -109,6 +112,26 @@ class TestOpenAIAdapter:
         )
         assert recorder.kwargs["model"] == "gpt-x"
 
+    async def test_remote_files_are_appended_to_the_last_user_message(self) -> None:
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(
+                attachments=(
+                    FileAttachment("file-audio-1", mime_type="audio/ogg"),
+                    FileAttachment("file-audio-2"),
+                )
+            ),
+            model="gpt-5.6-luna",
+        )
+
+        user = recorder.kwargs["input"][-1]
+        assert user["content"] == [
+            {"type": "input_text", "text": "a question"},
+            {"type": "input_file", "file_id": "file-audio-1"},
+            {"type": "input_file", "file_id": "file-audio-2"},
+        ]
+
     async def test_json_mode_can_be_satisfied_by_the_system_prompt(self) -> None:
         recorder = Recorder(SimpleNamespace(output_text="{}", usage=None, status="completed"))
 
@@ -173,6 +196,16 @@ class TestGeminiAdapter:
         )
 
         assert response.output_text == "an answer"
+
+    async def test_it_rejects_remote_files_instead_of_dropping_them(self) -> None:
+        recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
+
+        with pytest.raises(ConfigurationError, match="remote file"):
+            await GeminiAdapter(self._client(recorder)).generate(
+                _request(attachments=(FileAttachment("file-1"),)), model="gemini-x"
+            )
+
+        assert recorder.kwargs == {}
 
     async def test_it_maps_gemini_usage_names(self) -> None:
         recorder = Recorder(
@@ -350,7 +383,7 @@ class TestOpenRouterAdapter:
         )
 
         response = await OpenRouterAdapter(self._client(recorder)).generate(
-            _request(), model="deepseek/deepseek-chat-v3.1"
+            _request(), model="deepseek/deepseek-v4-pro"
         )
 
         assert response.output_text == "an answer"
@@ -435,8 +468,12 @@ class TestOpenRouterAdapter:
 class TestCapabilities:
     def test_each_adapter_declares_what_it_supports(self) -> None:
         assert OpenAIAdapter(SimpleNamespace()).capabilities.structured_outputs is True
+        assert OpenAIAdapter(SimpleNamespace()).capabilities.remote_files is True
+        assert OpenAIAdapter(SimpleNamespace()).capabilities.audio_transcription is True
         assert GeminiAdapter(SimpleNamespace()).capabilities.reasoning_effort is True
         assert GroqAdapter(SimpleNamespace()).capabilities.reasoning_effort is True
+        assert GroqAdapter(SimpleNamespace()).capabilities.audio_transcription is True
+        assert AssemblyAIAdapter(SimpleNamespace()).capabilities.audio_transcription is True
 
     def test_an_aggregator_does_not_promise_what_its_models_may_not_support(self) -> None:
         capabilities = OpenRouterAdapter(SimpleNamespace()).capabilities

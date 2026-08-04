@@ -30,6 +30,18 @@ class Message:
     content: str
 
 
+@dataclass(frozen=True, slots=True)
+class FileAttachment:
+    """An already-uploaded remote file referenced by provider id."""
+
+    file_id: str
+    mime_type: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.file_id.strip():
+            raise ValueError("file_id must be non-empty")
+
+
 class ResponseFormat(Enum):
     """What shape the caller expects back."""
 
@@ -44,6 +56,7 @@ class LLMRequest:
 
     model: str
     messages: tuple[Message, ...] = ()
+    attachments: tuple[FileAttachment, ...] = ()
     system_prompt: str | None = None
     response_format: ResponseFormat = ResponseFormat.TEXT
     response_schema: type[BaseModel] | None = None
@@ -68,6 +81,8 @@ class LLMRequest:
             raise ValueError("response_format=JSON_SCHEMA requires a response_schema")
         if not self.model.strip():
             raise ValueError("a model identifier is required")
+        if self.attachments and not any(message.role == "user" for message in self.messages):
+            raise ValueError("file attachments require at least one user message")
 
 
 class AttemptOutcome(Enum):

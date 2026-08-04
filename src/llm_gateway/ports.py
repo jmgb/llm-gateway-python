@@ -10,9 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from llm_gateway.audio import AudioExecution
 from llm_gateway.contracts import Execution
-from llm_gateway.pricing import Cost
-from llm_gateway.usage import TokenUsage
+from llm_gateway.pricing import AudioCost, Cost
+from llm_gateway.usage import AudioUsage, TokenUsage
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,11 +34,35 @@ class UsageRecord:
     succeeded: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AudioUsageRecord:
+    """Duration accounting, intentionally not part of ``UsageRecord``."""
+
+    request_id: str | None
+    source: str | None
+    provider: str
+    requested_model: str
+    model_used: str
+    usage: AudioUsage
+    cost: AudioCost
+    attempts: int
+    fallback_used: bool
+    latency_ms: int
+    succeeded: bool
+
+
 @runtime_checkable
 class UsageSink(Protocol):
     """Where token and cost accounting goes: a ledger, a metric, a log line."""
 
     def record(self, usage: UsageRecord) -> None: ...
+
+
+@runtime_checkable
+class AudioUsageSink(Protocol):
+    """Where transcription duration and cost accounting goes."""
+
+    def record(self, usage: AudioUsageRecord) -> None: ...
 
 
 @runtime_checkable
@@ -56,6 +81,11 @@ class AlertSink(Protocol):
 
 class NullUsageSink:
     def record(self, usage: UsageRecord) -> None:
+        return None
+
+
+class NullAudioUsageSink:
+    def record(self, usage: AudioUsageRecord) -> None:
         return None
 
 
@@ -91,5 +121,29 @@ def execution_to_record(
         fallback_used=execution.fallback_used,
         latency_ms=execution.latency_ms,
         finish_reason=execution.finish_reason,
+        succeeded=succeeded,
+    )
+
+
+def audio_execution_to_record(
+    execution: AudioExecution,
+    *,
+    usage: AudioUsage,
+    cost: AudioCost,
+    request_id: str | None,
+    source: str | None,
+    succeeded: bool,
+) -> AudioUsageRecord:
+    return AudioUsageRecord(
+        request_id=request_id,
+        source=source,
+        provider=execution.provider,
+        requested_model=execution.requested_model,
+        model_used=execution.model_used,
+        usage=usage,
+        cost=cost,
+        attempts=execution.attempt_count,
+        fallback_used=execution.fallback_used,
+        latency_ms=execution.latency_ms,
         succeeded=succeeded,
     )

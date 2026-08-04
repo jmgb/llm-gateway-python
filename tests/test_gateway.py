@@ -320,9 +320,9 @@ class TestReasoningEffortRouting:
         registry.register(adapter, model_prefixes=("gemini-",))
         gateway = LLMGateway(registry=registry)
 
-        await gateway.generate(_request(model="gemini-3-flash-preview", reasoning_effort="minimal"))
+        await gateway.generate(_request(model="gemini-3.5-flash", reasoning_effort="minimal"))
 
-        assert adapter.calls == ["gemini-3-flash-preview"]
+        assert adapter.calls == ["gemini-3.5-flash"]
 
     async def test_an_unsupported_effort_is_downgraded_for_gemini_3_pro(self) -> None:
         adapter = FakeAdapter(_ok("x"))
@@ -364,7 +364,7 @@ class TestReasoningEffortRouting:
         registry.register(adapter, model_prefixes=("gpt-",))
         gateway = LLMGateway(registry=registry)
 
-        await gateway.generate(_request(model="gpt-5.2-2025-12-11", reasoning_effort="medium"))
+        await gateway.generate(_request(model="gpt-realtime-2.1-mini", reasoning_effort="medium"))
 
         assert adapter.requests[0].reasoning_effort is None
 

@@ -67,7 +67,7 @@ async def test_temperature_is_dropped_for_a_model_that_rejects_it() -> None:
 async def test_temperature_survives_for_a_model_that_accepts_it() -> None:
     adapter = RecordingAdapter(_response("x"))
 
-    await _gateway(adapter).generate(_request("gpt-5.2-2025-12-11", temperature=0.2))
+    await _gateway(adapter).generate(_request("gpt-realtime-2.1-mini", temperature=0.2))
 
     assert adapter.requests[0].temperature == 0.2
 
@@ -76,7 +76,11 @@ async def test_a_fallback_does_not_inherit_a_temperature_its_model_rejects() -> 
     adapter = RecordingAdapter(RateLimitedError("429"), _response("from the fallback"))
 
     result = await _gateway(adapter).generate(
-        _request("gpt-5.2-2025-12-11", temperature=0.2, fallback="gpt-5.6-terra")
+        _request(
+            "gpt-realtime-2.1-mini",
+            temperature=0.2,
+            fallback="gpt-5.6-terra",
+        )
     )
 
     assert result.output == "from the fallback"

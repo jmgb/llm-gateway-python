@@ -28,6 +28,12 @@ asserts it.
 Arithmetic is done in **whole microdollars** with `ROUND_HALF_UP`, so totals
 add up exactly and there is no floating-point drift across many small calls.
 
+The model identity catalogue also supports `pricing_unit="audio_minutes"` for
+speech models. Those entries remain routable and carry their provider's
+per-minute metadata, but `builtin_price_catalog()` excludes them because its
+`TokenUsage` contract cannot represent audio duration. Use
+`builtin_audio_price_catalog()` and `AudioUsage` for that path.
+
 ## The three measurements
 
 `Cost.measurement` is as important as the amount:
@@ -59,6 +65,7 @@ Providers disagree here, so each adapter normalises at its boundary:
 | OpenAI (Responses) | `output_tokens_details.reasoning_tokens`, already inside `output_tokens` | passed through |
 | OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through |
 | Gemini | `thoughts_token_count`, **outside** `candidates_token_count` | folded into `output_tokens` |
+| AssemblyAI | no token usage; duration belongs to the audio contract | kept out of token pricing |
 
 Adding the breakdown back on top of the total is a real bug this package had:
 at a thinking effort where reasoning dominates the visible answer, it
@@ -127,9 +134,20 @@ For something more dynamic — prices from a database, per-customer rates —
 implement the `PriceCatalog` protocol yourself and pass it to `LLMGateway`. It
 needs a `version` property and an `estimate(model, usage)` method.
 
-## What is not here
+## Audio duration pricing
 
-**Audio and speech-to-text pricing**, which is billed per hour with
-provider-specific minimum billable durations. It is a different cost model, and
-no capability in this package produces it. It will be added when a real
-consumer of it exists here.
+Audio and speech-to-text cost accounting is deliberately separate from the
+token-based `PriceCatalog`. `LLMGateway.transcribe()` returns `AudioUsage` and
+`AudioCost`, and records through `AudioUsageSink` when one is supplied.
+
+The built-in catalogue currently includes:
+
+| Model family | Rate | Minimum |
+|---|---:|---:|
+| OpenAI `gpt-transcribe` | `$0.0045` / minute | none |
+| Groq Whisper | `$0.02`–`$0.111` / hour | 10 seconds |
+| AssemblyAI Universal | `$0.15`–`$0.21` / hour | none |
+
+Missing duration is `UNAVAILABLE`, never zero. Audio retries and fallbacks are
+represented by `AudioAttempt`/`AudioExecution`; their cost never enters token
+usage or token fallback pricing.

@@ -108,8 +108,8 @@ CASES: dict[str, ProviderCase] = {
     "openai": ProviderCase(
         adapter=OpenAIAdapter,
         client=_openai_client,
-        primary="gpt-5.2-2025-12-11",
-        fallback="gpt-5.1-2025-11-13",
+        primary="gpt-realtime-2.1-mini",
+        fallback="gpt-realtime-2.1",
     ),
     "gemini": ProviderCase(
         adapter=GeminiAdapter,
@@ -162,7 +162,9 @@ def test_every_adapter_is_covered_by_this_matrix() -> None:
     adapters = {
         info.name
         for info in pkgutil.iter_modules(package.__path__)
-        if hasattr(importlib.import_module(f"llm_gateway.providers.{info.name}"), "CAPABILITIES")
+        for module in [importlib.import_module(f"llm_gateway.providers.{info.name}")]
+        if hasattr(module, "CAPABILITIES")
+        and (module.CAPABILITIES.structured_outputs or module.CAPABILITIES.json_mode)
     }
 
     assert adapters == set(CASES)

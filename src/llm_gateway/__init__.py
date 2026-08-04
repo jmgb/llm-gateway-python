@@ -5,12 +5,22 @@ consuming application, never reads credentials on import and never logs prompt
 or response content by default.
 """
 
+from llm_gateway.audio import (
+    AudioAttempt,
+    AudioExecution,
+    AudioInput,
+    AudioSegment,
+    ProviderTranscriptionResponse,
+    TranscriptionRequest,
+    TranscriptionResult,
+)
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import (
     Attempt,
     AttemptOutcome,
     Execution,
     FailurePhase,
+    FileAttachment,
     LLMRequest,
     LLMResult,
     Message,
@@ -20,6 +30,7 @@ from llm_gateway.contracts import (
 )
 from llm_gateway.errors import (
     AllAttemptsFailed,
+    AllTranscriptionsFailed,
     AuthenticationError,
     ConfigurationError,
     InvalidRequestError,
@@ -39,6 +50,7 @@ from llm_gateway.models import (
     CATALOG_VERSION,
     MODEL_CATALOG,
     ModelInfo,
+    builtin_audio_price_catalog,
     builtin_price_catalog,
     lookup_model,
     models_by_provider,
@@ -47,32 +59,55 @@ from llm_gateway.models import (
 from llm_gateway.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
 from llm_gateway.ports import (
     AlertSink,
+    AudioUsageRecord,
+    AudioUsageSink,
     EventSink,
     NullAlertSink,
+    NullAudioUsageSink,
     NullEventSink,
     NullUsageSink,
     UsageRecord,
     UsageSink,
 )
 from llm_gateway.pricing import (
+    AudioCost,
+    AudioPriceCatalog,
+    AudioRate,
     Cost,
     CostMeasurement,
     ModelRate,
     NullPriceCatalog,
     PriceCatalog,
+    StaticAudioPriceCatalog,
     StaticPriceCatalog,
 )
-from llm_gateway.providers.base import ProviderAdapter, ProviderResponse
+from llm_gateway.providers.base import (
+    AudioProviderAdapter,
+    ProviderAdapter,
+    ProviderResponse,
+)
 from llm_gateway.registry import ProviderRegistry
-from llm_gateway.usage import TokenUsage
+from llm_gateway.usage import AudioUsage, TokenUsage
 
 __all__ = [
     "CATALOG_VERSION",
     "MODEL_CATALOG",
     "AlertSink",
     "AllAttemptsFailed",
+    "AllTranscriptionsFailed",
     "Attempt",
     "AttemptOutcome",
+    "AudioAttempt",
+    "AudioCost",
+    "AudioExecution",
+    "AudioInput",
+    "AudioPriceCatalog",
+    "AudioProviderAdapter",
+    "AudioRate",
+    "AudioSegment",
+    "AudioUsage",
+    "AudioUsageRecord",
+    "AudioUsageSink",
     "AuthenticationError",
     "ConfigurationError",
     "Cost",
@@ -81,6 +116,7 @@ __all__ = [
     "Execution",
     "FailurePhase",
     "FallbackPolicy",
+    "FileAttachment",
     "InvalidRequestError",
     "LLMGateway",
     "LLMGatewayError",
@@ -90,6 +126,7 @@ __all__ = [
     "ModelInfo",
     "ModelRate",
     "NullAlertSink",
+    "NullAudioUsageSink",
     "NullEventSink",
     "NullPriceCatalog",
     "NullUsageSink",
@@ -103,6 +140,7 @@ __all__ = [
     "ProviderRegistry",
     "ProviderResponse",
     "ProviderTimeoutError",
+    "ProviderTranscriptionResponse",
     "RateLimitedError",
     "ReasoningEffort",
     "ResponseFormat",
@@ -110,12 +148,16 @@ __all__ = [
     "Role",
     "SchemaValidationError",
     "ServiceUnavailableError",
+    "StaticAudioPriceCatalog",
     "StaticPriceCatalog",
     "TimeoutPolicy",
     "TokenUsage",
+    "TranscriptionRequest",
+    "TranscriptionResult",
     "UnknownModelError",
     "UsageRecord",
     "UsageSink",
+    "builtin_audio_price_catalog",
     "builtin_price_catalog",
     "lookup_model",
     "models_by_provider",

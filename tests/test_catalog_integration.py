@@ -50,7 +50,7 @@ class TestRoutingUsesTheCatalogue:
 
         assert registry.resolve("gemini-3.6-flash").name == "gemini"
         assert registry.resolve("gpt-5.6-sol").name == "openai"
-        assert registry.resolve("meta-llama/llama-4-scout-17b-16e-instruct").name == "groq"
+        assert registry.resolve("openai/gpt-oss-120b").name == "groq"
 
 
 class TestDefaultPricing:

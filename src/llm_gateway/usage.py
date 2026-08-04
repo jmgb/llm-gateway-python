@@ -80,3 +80,34 @@ class TokenUsage:
             cached_input_tokens=_add(self.cached_input_tokens, other.cached_input_tokens),
             partial_aggregate=not (self.complete and other.complete),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AudioUsage:
+    """Audio duration reported by a transcription provider.
+
+    ``None`` means the provider did not report duration. It is intentionally a
+    different type from ``TokenUsage`` so a transcription cannot enter token
+    pricing by accident.
+    """
+
+    duration_seconds: float | None = None
+    partial_aggregate: bool = False
+
+    @classmethod
+    def unknown(cls) -> AudioUsage:
+        return cls()
+
+    @property
+    def complete(self) -> bool:
+        return self.duration_seconds is not None and not self.partial_aggregate
+
+    def merge(self, other: AudioUsage) -> AudioUsage:
+        if self.duration_seconds is None and other.duration_seconds is None:
+            duration = None
+        else:
+            duration = (self.duration_seconds or 0.0) + (other.duration_seconds or 0.0)
+        return AudioUsage(
+            duration_seconds=duration,
+            partial_aggregate=not (self.complete and other.complete),
+        )

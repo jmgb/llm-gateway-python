@@ -38,7 +38,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ModelRate, StaticAudioPriceCatalog, StaticPriceCatalog
 
-CATALOG_VERSION = "2026-08-04.3"
+CATALOG_VERSION = "2026-08-04.4"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -182,16 +182,6 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         supports_temperature=False,
         pricing_unit="audio_minutes",
         audio_price_per_minute="0.0045",
-    ),
-    _m(
-        "gpt-4o-mini-transcribe-2025-12-15",
-        "openai",
-        "0",
-        "0",
-        notes="speech-to-text; billed at USD 0.006 per audio minute",
-        supports_temperature=False,
-        pricing_unit="audio_minutes",
-        audio_price_per_minute="0.006",
     ),
     # ---- Groq (OpenAI-compatible ids, served by Groq) -------------------
     _m(

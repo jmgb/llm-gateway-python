@@ -328,8 +328,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-04.3"
-    PRICE_FINGERPRINT = "79c61d493483b596afb6c9b8e1a97e17e71c02c810f008c80fa73f925278aed0"
+    PRICED_AT_VERSION = "2026-08-04.4"
+    PRICE_FINGERPRINT = "6d717c63f3373d313a2a492a655d1c00d332857abfadc39168e6667fac0f8424"
 
     @staticmethod
     def _fingerprint() -> str:

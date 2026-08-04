@@ -23,6 +23,8 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from llm_gateway.audio import TranscriptionRequest, TranscriptionResult
+from llm_gateway.audio_gateway import AudioGateway
 from llm_gateway.contracts import (
     Attempt,
     AttemptOutcome,
@@ -46,6 +48,7 @@ from llm_gateway.json_payload import parse_json_payload
 from llm_gateway.models import ModelInfo, builtin_price_catalog, lookup_model
 from llm_gateway.ports import (
     AlertSink,
+    AudioUsageSink,
     EventSink,
     NullAlertSink,
     NullEventSink,
@@ -53,7 +56,7 @@ from llm_gateway.ports import (
     UsageSink,
     execution_to_record,
 )
-from llm_gateway.pricing import Cost, PriceCatalog
+from llm_gateway.pricing import AudioPriceCatalog, Cost, PriceCatalog
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import TokenUsage
@@ -75,7 +78,9 @@ class LLMGateway:
         *,
         registry: ProviderRegistry,
         price_catalog: PriceCatalog | None = None,
+        audio_price_catalog: AudioPriceCatalog | None = None,
         usage_sink: UsageSink | None = None,
+        audio_usage_sink: AudioUsageSink | None = None,
         event_sink: EventSink | None = None,
         alert_sink: AlertSink | None = None,
     ) -> None:
@@ -87,6 +92,17 @@ class LLMGateway:
         self._usage_sink = usage_sink or NullUsageSink()
         self._events = event_sink or NullEventSink()
         self._alerts = alert_sink or NullAlertSink()
+        self._audio = AudioGateway(
+            registry=registry,
+            price_catalog=audio_price_catalog,
+            usage_sink=audio_usage_sink,
+            event_sink=self._events,
+            alert_sink=self._alerts,
+        )
+
+    async def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
+        """Transcribe audio with duration accounting separate from tokens."""
+        return await self._audio.transcribe(request)
 
     async def generate(self, request: LLMRequest) -> LLMResult:
         """Run the request to completion, or raise a typed error.
@@ -116,6 +132,11 @@ class LLMGateway:
         plan = [request.model, *request.fallback_policy.models]
         for model in plan:
             self._registry.resolve(model)
+            info = lookup_model(model)
+            if info is not None and info.pricing_unit == "audio_minutes":
+                raise ConfigurationError(
+                    f"{model!r} is audio-priced; use LLMGateway.transcribe() instead"
+                )
         requests_by_model = {model: _request_for_model(request, model) for model in plan}
 
         last_failure: LLMGatewayError | None = None

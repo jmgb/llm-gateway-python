@@ -19,6 +19,7 @@ class ProviderCapabilities:
     function_calling: bool = False
     inline_files: bool = False
     remote_files: bool = False
+    audio_transcription: bool = False
     reasoning_effort: bool = False
     conversation_history: bool = True
     reports_token_usage: bool = True

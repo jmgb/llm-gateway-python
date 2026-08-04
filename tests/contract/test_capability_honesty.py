@@ -18,13 +18,14 @@ from typing import Any
 
 import pytest
 
-from llm_gateway import LLMRequest, ProviderCapabilities
+from llm_gateway import LLMRequest, ProviderCapabilities, TranscriptionRequest
 
 # Capability -> the request field that would let a caller use it.
 REQUEST_FIELD_FOR_CAPABILITY = {
     "function_calling": "tools",
     "inline_files": "attachments",
     "remote_files": "attachments",
+    "audio_transcription": "audio",
     "structured_outputs": "response_schema",
     "json_mode": "response_format",
     "reasoning_effort": "reasoning_effort",
@@ -45,7 +46,9 @@ def _declared_capabilities() -> dict[str, Any]:
 
 
 def _request_fields() -> set[str]:
-    return {field.name for field in dataclasses.fields(LLMRequest)}
+    return {field.name for field in dataclasses.fields(LLMRequest)} | {
+        field.name for field in dataclasses.fields(TranscriptionRequest)
+    }
 
 
 def test_every_capability_names_the_request_field_that_reaches_it() -> None:

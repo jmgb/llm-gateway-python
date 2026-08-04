@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from llm_gateway.audio import AudioAttempt
     from llm_gateway.contracts import Attempt
 
 
@@ -95,6 +96,18 @@ class AllAttemptsFailed(LLMGatewayError):
     """
 
     def __init__(self, message: str, *, attempts: tuple[Attempt, ...]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+    @property
+    def last_error(self) -> str | None:
+        return self.attempts[-1].error_type if self.attempts else None
+
+
+class AllTranscriptionsFailed(LLMGatewayError):
+    """Every audio model and retry failed, with duration accounting preserved."""
+
+    def __init__(self, message: str, *, attempts: tuple[AudioAttempt, ...]) -> None:
         super().__init__(message)
         self.attempts = attempts
 

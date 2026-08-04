@@ -7,11 +7,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from llm_gateway.audio import (
+    ProviderTranscriptionResponse,
+    TranscriptionRequest,
+    normalize_provider_transcription,
+)
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
+from llm_gateway.errors import ConfigurationError
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.schema_prompt import system_prompt_for
+from llm_gateway.providers.validation import reject_file_attachments
 from llm_gateway.usage import TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
@@ -21,6 +28,7 @@ CAPABILITIES = ProviderCapabilities(
     function_calling=False,
     inline_files=False,
     remote_files=False,
+    audio_transcription=True,
     reasoning_effort=True,
     conversation_history=True,
     reports_token_usage=True,
@@ -37,6 +45,7 @@ class GroqAdapter:
         self._client = client
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
+        reject_file_attachments(request, provider=self.name)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": self._build_messages(request),
@@ -64,6 +73,30 @@ class GroqAdapter:
             finish_reason=getattr(choice, "finish_reason", None),
             model_used=getattr(raw, "model", None),
         )
+
+    async def transcribe(
+        self, request: TranscriptionRequest, *, model: str
+    ) -> ProviderTranscriptionResponse:
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "response_format": "verbose_json",
+            "temperature": 0.0,
+        }
+        if request.audio.url is not None:
+            kwargs["url"] = request.audio.url
+        elif request.audio.data is not None:
+            kwargs["file"] = (request.audio.filename, request.audio.data)
+        else:
+            raise ConfigurationError("Groq transcription requires audio bytes or a URL")
+        if request.language is not None:
+            kwargs["language"] = request.language
+        if request.prompt:
+            kwargs["prompt"] = request.prompt
+        try:
+            raw = await self._client.audio.transcriptions.create(**kwargs)
+        except Exception as error:
+            raise classify_provider_error(error) from None
+        return normalize_provider_transcription(raw, request=request, model=model)
 
     def _build_messages(self, request: LLMRequest) -> list[dict[str, str]]:
         """Carry whatever the requested format needs the model to be told.
