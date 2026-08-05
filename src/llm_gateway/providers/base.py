@@ -18,6 +18,7 @@ from llm_gateway.media import (
     ProviderVideoResponse,
     VideoRequest,
 )
+from llm_gateway.tools import ProviderToolCall
 from llm_gateway.usage import TokenUsage
 
 
@@ -30,6 +31,8 @@ class ProviderResponse:
     finish_reason: str | None = None
     model_used: str | None = None
     """Set when the provider reports a different model than the one requested."""
+    tool_calls: tuple[ProviderToolCall, ...] = ()
+    """Calls the model made, still carrying the arguments exactly as sent."""
 
 
 @runtime_checkable

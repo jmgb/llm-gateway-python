@@ -12,6 +12,7 @@ Chat Completions and cannot promise this one's capabilities.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from llm_gateway.audio import (
@@ -25,15 +26,16 @@ from llm_gateway.errors import ConfigurationError
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.strict_schema import strict_json_schema
+from llm_gateway.tools import FunctionTool, ProviderToolCall, RequiredTool, ToolChoice
 from llm_gateway.usage import TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=True,
     json_mode=True,
-    # The provider does all three; this package's request contract has no way
-    # to ask for any of them, and a capability a caller cannot exercise reads
-    # as available while answering nothing. Declared when the contract grows.
-    function_calling=False,
+    function_calling=True,
+    # The provider does this too; the request contract has no way to ask for
+    # it, and a capability a caller cannot exercise reads as available while
+    # answering nothing. Declared when the contract grows.
     inline_files=False,
     remote_files=True,
     audio_transcription=True,
@@ -74,6 +76,7 @@ class OpenAIAdapter:
             usage=_usage(getattr(raw, "usage", None)),
             finish_reason=getattr(raw, "status", None),
             model_used=getattr(raw, "model", None),
+            tool_calls=_tool_calls(raw),
         )
 
     async def transcribe(
@@ -137,6 +140,12 @@ class OpenAIAdapter:
             text["verbosity"] = request.verbosity
         if text:
             kwargs["text"] = text
+
+        if request.tools:
+            kwargs["tools"] = [_function_tool(tool) for tool in request.tools]
+            # Stating nothing and stating "auto" are the same instruction here,
+            # and sending it makes the request self-describing in a provider log.
+            kwargs["tool_choice"] = _tool_choice(request.tool_choice)
         return kwargs
 
     def _build_input(self, request: LLMRequest) -> list[dict[str, Any]]:
@@ -162,7 +171,75 @@ class OpenAIAdapter:
                     for attachment in request.attachments
                 )
                 break
+
+        # After the attachment pass, which walks the list looking for a role:
+        # these items have none, and they must stay at the end anyway. The
+        # model's own call is replayed before its output, because the provider
+        # rejects an output that answers nothing it can see.
+        for result in request.tool_results:
+            messages.append(
+                {
+                    "type": "function_call",
+                    "call_id": result.call.id,
+                    "name": result.call.name,
+                    "arguments": json.dumps(result.call.arguments, ensure_ascii=False),
+                }
+            )
+            messages.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": result.call.id,
+                    "output": result.output,
+                }
+            )
         return messages
+
+
+def _function_tool(tool: FunctionTool) -> dict[str, Any]:
+    """The flat shape the Responses API takes, unlike Chat Completions' nested one.
+
+    ``additionalProperties`` is filled in when the caller left it out: the API
+    rejects a function schema without it, which is a 400 for the whole call and
+    not just for the tool.
+    """
+    parameters = dict(tool.parameters)
+    parameters.setdefault("additionalProperties", False)
+    return {
+        "type": "function",
+        "name": tool.name,
+        "description": tool.description or "",
+        "parameters": parameters,
+    }
+
+
+def _tool_choice(choice: ToolChoice | RequiredTool | None) -> Any:
+    if isinstance(choice, RequiredTool):
+        return {"type": "function", "name": choice.name}
+    return (choice or ToolChoice.AUTO).value
+
+
+def _tool_calls(raw: Any) -> tuple[ProviderToolCall, ...]:
+    """Read the calls out of an output list that also carries reasoning items."""
+    items = getattr(raw, "output", None) or ()
+    calls: list[ProviderToolCall] = []
+    for index, item in enumerate(items):
+        if getattr(item, "type", None) != "function_call":
+            continue
+        arguments = getattr(item, "arguments", "")
+        calls.append(
+            ProviderToolCall(
+                # `call_id` is the one the continuation must quote; `id` is the
+                # output item's own and is not interchangeable with it.
+                id=getattr(item, "call_id", None) or getattr(item, "id", None) or f"call_{index}",
+                name=getattr(item, "name", ""),
+                arguments=(
+                    json.dumps(arguments, ensure_ascii=False)
+                    if isinstance(arguments, dict | list)
+                    else str(arguments)
+                ),
+            )
+        )
+    return tuple(calls)
 
 
 def _usage(raw: Any) -> TokenUsage:

@@ -19,7 +19,7 @@ from llm_gateway.errors import ConfigurationError, ProviderError
 from llm_gateway.media import GeneratedImage, ImageRequest, ProviderImageResponse
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
-from llm_gateway.providers.validation import reject_file_attachments
+from llm_gateway.providers.validation import reject_file_attachments, reject_tools
 from llm_gateway.usage import ImageUsage, TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
@@ -51,6 +51,7 @@ class GeminiAdapter:
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         reject_file_attachments(request, provider=self.name)
+        reject_tools(request, provider=self.name)
         try:
             raw = await self._client.aio.models.generate_content(
                 model=model,

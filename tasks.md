@@ -2,7 +2,21 @@
 
 ## Provider-neutral tool calling
 
-- [ ] **P1 — Add provider-neutral function tool calling as a v0.10 public contract.**
+- [x] **P1 — Add provider-neutral function tool calling as a v0.10 public contract.**
+
+  Shipped as `FunctionTool`, `ToolChoice`, `RequiredTool`, `ToolCall` and
+  `ToolResult`, reached through `LLMRequest.tools` / `tool_choice` /
+  `tool_results` and answered through `LLMResult.tool_calls`, with OpenAI and
+  Groq declaring the capability and Gemini and OpenRouter refusing it. See
+  `[Unreleased]` in `CHANGELOG.md`, the tool sections of `README.md` and
+  "Why the tool loop stays in the application" in `docs/architecture.md`.
+
+  Two decisions worth carrying forward: a tool call is a *successful* attempt
+  and skips output parsing entirely, while a call the application could not
+  dispatch is a billed failure that lets the fallback run; and validation stops
+  at what makes a call dispatchable — a declared name and a JSON object of
+  arguments — rather than reaching for a JSON Schema validator this package
+  does not depend on.
 
   ### Why this belongs in the package
 

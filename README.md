@@ -142,6 +142,58 @@ every attempt, with the parsing or schema error as its `__cause__`.
 Schema validation errors name each Pydantic `loc` and `type`, while dynamic
 response keys and values stay out of the message.
 
+### Tool calling
+
+The gateway declares your functions, hands you the calls the model made, and
+puts your results back on the wire. It never runs a function: authorisation,
+side effects and business schemas are yours, and so is the loop.
+
+```python
+from dataclasses import replace
+
+from llm_gateway import FunctionTool, LLMRequest, Message, ToolResult
+
+request = LLMRequest(
+    model="gpt-5.6",
+    messages=(Message("user", "What is the weather in Madrid?"),),
+    tools=(
+        FunctionTool(
+            name="get_weather",
+            description="Current weather for a city",
+            parameters={
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        ),
+    ),
+)
+result = await gateway.generate(request)
+
+if result.tool_calls:
+    call = result.tool_calls[0]
+    output = await my_app.run(call.name, call.arguments)  # yours, not the package's
+    result = await gateway.generate(replace(request, tool_results=(ToolResult(call, output),)))
+
+result.output  # the answer, once the model stopped asking for functions
+```
+
+`tool_choice` takes `ToolChoice.AUTO`, `NONE`, `REQUIRED` or
+`RequiredTool("get_weather")` to force one. A `ToolResult` holds the `ToolCall`
+it answers rather than a loose id, because both halves go back on the wire and
+a pair that drifted apart answers the wrong question.
+
+Tool calls never arrive as `output`: when the model calls a function `output`
+is `None` and `tool_calls` is non-empty, and a requested JSON format is not
+parsed out of a reply that contains no answer. Arguments the caller could not
+dispatch — unparseable, not a JSON object, or naming a function the request
+never declared — make that attempt a **billed failure**, so the fallback still
+gets its turn and the money is still counted. The package checks what makes a
+call dispatchable, not the whole JSON Schema: that needs a validator this
+package does not depend on, and the code that owns the function validates
+anyway. Definitions, arguments and results never reach a usage, event or alert
+sink.
+
 ### Transcription
 
 Speech-to-text is a separate operation with duration usage and audio pricing:
@@ -313,7 +365,17 @@ in the messages. Setting `response_format` is what creates the obligation, so
 the adapter meets it rather than the caller's prompt — and a prompt that already
 says "json" is left as it is.
 
-`function_calling` and `inline_files` remain unsupported. OpenAI declares
+OpenAI and Groq declare `function_calling=True`, each in its own dialect: the
+Responses API takes a flat tool and answers with `function_call` items carrying
+a `call_id`, while Chat Completions nests the function and answers inside
+`choices[0].message.tool_calls`. Groq sends tools *or* a JSON `response_format`
+and never both, which costs nothing — it enforces no schema either way, the
+system prompt still states the shape and the gateway still validates. Gemini
+and OpenRouter declare `False` and reject a request carrying tools rather than
+answering prose where a call was expected; their request, response and
+continuation shapes get the capability once deterministic tests cover them.
+
+`inline_files` remains unsupported. OpenAI declares
 `remote_files=True`: `LLMRequest.attachments` accepts already-uploaded file IDs
 and the Responses adapter appends them to the last user message as
 `input_file` parts. Providers without that capability reject the request rather
@@ -406,12 +468,14 @@ catalog protocol yourself. See
 
 ## Not in this version
 
-Tools/function calling, inline files, streaming and Gemini File Search remain
-absent, and so does any video provider that answers only through a webhook —
-`VideoRequest` polls, so Replicate's predictions and Sora's jobs need a
-two-phase contract this version does not have. Remote file IDs for OpenAI,
-audio transcription, image generation and polled video generation are
-supported with their own capability and cost contracts.
+Inline files, streaming and Gemini File Search remain absent, and so do
+provider-hosted tools — web search, code execution, file search — and any
+package-owned loop that would execute a function for you. Nor is there yet a
+video provider that answers only through a webhook — `VideoRequest` polls, so
+Replicate's predictions and Sora's jobs need a two-phase contract this version
+does not have. Function tools, remote file IDs for OpenAI, audio
+transcription, image generation and polled video generation are supported with
+their own capability and cost contracts.
 
 ## Documentation
 

@@ -24,6 +24,8 @@ Provider-shaped code moved here. Product-shaped code stayed in the application.
 | Deciding whether an answer is usable | `gateway.py` | It decides whether the attempt failed, so it cannot sit after the attempt |
 | Adapting a request to the target model | `gateway.py`, `models.py` | A fallback inherits a request written for another model |
 | Satisfying what a response format needs said | `providers/schema_prompt.py` | Which providers enforce schemas, or demand the word "json", changes with the provider |
+| Declaring tools, correlating calls and results | `tools.py`, `providers/` | Two dialects for one idea; the wire shape changes with the provider |
+| Running a function the model asked for | The application | Authorisation and side effects change with the product |
 | Ledger, tenant, alerting, history | The application | Changes with the product |
 | Prompts, business schemas, model choice per feature | The application | Changes with the product |
 
@@ -106,6 +108,28 @@ Adapters are deliberately dumb. They do not retry, do not fall back, do not
 price and do not aggregate. Every one of those, done once per provider, is how
 the original file reached two thousand lines.
 
+### Why the tool loop stays in the application
+
+Every consumer that calls functions today wraps the provider call in a loop:
+run what the model asked for, send the output back, repeat until it answers.
+The loop looks identical in all of them, and it is not — each one carries its
+own iteration cap, its own permission checks, its own idea of what a function
+may touch and its own record of what was executed on whose behalf. Owning that
+here would mean the package deciding, on the application's behalf, that a side
+effect was allowed to happen.
+
+So the contract is one round trip. The gateway declares tools, hands back typed
+`ToolCall`s and puts typed `ToolResult`s back on the wire in each provider's
+dialect; the application runs the function and asks again. A package-owned loop
+becomes a separate question once two applications demonstrate the *same*
+execution semantics, which they have not.
+
+Correlation is structural rather than conventional: `ToolResult` holds the
+`ToolCall` it answers instead of a loose id, because both halves have to go
+back on the wire together — an assistant turn replaying the call, then its
+output — and a pair assembled by zipping two lists answers the wrong question
+the first time a provider returns them out of order.
+
 ## Why the result is four objects
 
 `LLMResult` keeps `output`, `usage`, `execution` and `cost` apart. Flattening
@@ -151,6 +175,15 @@ system says it:
 The same model is **not** retried after unusable output: the same prompt and
 the same model reproduce the same malformed answer, so the retry buys a second
 invoice for one failure. `RetryPolicy` still governs provider failures.
+
+A tool call is judged by the same rule, from the other direction. A model that
+called a function *answered*, so the attempt succeeds even though there is no
+text and no JSON to validate — parsing a reply that contains no answer would
+turn a correct call into a billed parsing failure. What does fail is a call the
+application could not dispatch: arguments that do not parse, arguments that are
+not a JSON object, or a name the request never declared. Those are
+`OutputParsingError` and follow the table above exactly, arguments never
+repeated in the message.
 
 `Attempt.failure_phase` names which of the five phases ended an attempt —
 `configuration`, `provider`, `timeout`, `output_parsing`,

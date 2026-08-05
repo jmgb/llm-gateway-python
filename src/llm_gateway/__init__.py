@@ -127,6 +127,14 @@ from llm_gateway.providers.base import (
     VideoProviderAdapter,
 )
 from llm_gateway.registry import ProviderRegistry
+from llm_gateway.tools import (
+    FunctionTool,
+    ProviderToolCall,
+    RequiredTool,
+    ToolCall,
+    ToolChoice,
+    ToolResult,
+)
 from llm_gateway.usage import AudioUsage, ImageUsage, TokenUsage, VideoUsage
 
 __all__ = [
@@ -159,6 +167,7 @@ __all__ = [
     "FailurePhase",
     "FallbackPolicy",
     "FileAttachment",
+    "FunctionTool",
     "GeneratedImage",
     "GeneratedVideo",
     "ImageAttempt",
@@ -201,10 +210,12 @@ __all__ = [
     "ProviderRegistry",
     "ProviderResponse",
     "ProviderTimeoutError",
+    "ProviderToolCall",
     "ProviderTranscriptionResponse",
     "ProviderVideoResponse",
     "RateLimitedError",
     "ReasoningEffort",
+    "RequiredTool",
     "ResponseFormat",
     "RetryPolicy",
     "Role",
@@ -217,6 +228,9 @@ __all__ = [
     "StaticVideoPriceCatalog",
     "TimeoutPolicy",
     "TokenUsage",
+    "ToolCall",
+    "ToolChoice",
+    "ToolResult",
     "TranscriptionRequest",
     "TranscriptionResult",
     "UnknownModelError",

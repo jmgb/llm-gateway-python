@@ -43,7 +43,12 @@ Changes that break these will be declined, however convenient:
 - **Exhausted calls raise.** They never return something that reads as success.
 - **No module reads the environment or constructs a credentialed client.**
   Applications own their credentials.
-- **Sinks never receive prompt or response content.**
+- **Sinks never receive prompt or response content.** Tool definitions,
+  arguments and results count as content: they carry whatever the model was
+  told, which may be personal data, a credential or a business record.
+- **The package never executes an application function.** It declares tools,
+  hands back the calls and puts the results back on the wire. Authorisation,
+  side effects and the loop that repeats them stay in the application.
 - **No provider SDK is imported at module import time.** Extras are optional;
   `import llm_gateway` must work with none of them installed.
 
@@ -140,6 +145,14 @@ picture as tokens keeps `pricing_unit="tokens"` and is priced from
 `UNAVAILABLE` cost is the honest answer and a guessed one is not. The form of
 the source image is the provider's: reject the one it cannot use rather than
 downloading or hosting it, which is application work.
+
+A provider that supports function tools declares `function_calling=True` only
+once its adapter can do the whole round trip against a fake client: send the
+declarations, read the calls back with the provider's own ids, and put a
+continuation on the wire that replays each call before its result. Wire-format
+similarity is not evidence — an adapter that cannot yet do all three calls
+`reject_tools()` instead, so a caller gets a typed refusal rather than prose
+where a call was expected.
 
 An OpenAI-compatible API is **not** on its own a reason to skip all this. It
 decides the transport, not the provider. Ask instead:

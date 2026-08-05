@@ -41,6 +41,7 @@ from llm_gateway.errors import (
     ConfigurationError,
     LLMGatewayError,
     OutputError,
+    OutputParsingError,
     ProviderError,
     ProviderTimeoutError,
     SchemaValidationError,
@@ -70,6 +71,7 @@ from llm_gateway.pricing import (
 )
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.registry import ProviderRegistry
+from llm_gateway.tools import ToolCall
 from llm_gateway.usage import TokenUsage
 
 
@@ -79,6 +81,7 @@ class _Completion:
 
     response: ProviderResponse
     output: Any
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 class LLMGateway:
@@ -229,7 +232,13 @@ class LLMGateway:
                 )
             )
             self._events.emit("llm_call_succeeded", _event_fields(request, execution, cost))
-            return LLMResult(output=output, usage=usage, execution=execution, cost=cost)
+            return LLMResult(
+                output=output,
+                usage=usage,
+                execution=execution,
+                cost=cost,
+                tool_calls=outcome.tool_calls,
+            )
 
         self._report_failure(request, attempts, started=started)
         raise AllAttemptsFailed(
@@ -303,7 +312,7 @@ class LLMGateway:
                 usage = response.usage
                 cost = self._prices.estimate(model, usage)
                 try:
-                    output = _interpret(response, request)
+                    output, tool_calls = _interpret(response, request)
                 except OutputError as unusable:
                     # The provider answered and will invoice for it, so the
                     # tokens it reported are recorded exactly as on a success.
@@ -338,7 +347,7 @@ class LLMGateway:
                         started=attempt_started,
                     )
                 )
-                return _Completion(response=response, output=output)
+                return _Completion(response=response, output=output, tool_calls=tool_calls)
 
             attempts.append(
                 _record_attempt(
@@ -452,19 +461,29 @@ def _aggregate(attempts: list[Attempt]) -> tuple[TokenUsage, Cost]:
     return usage, cost
 
 
-def _interpret(response: ProviderResponse, request: LLMRequest) -> object:
-    """Turn provider text into what the caller asked for."""
+def _interpret(
+    response: ProviderResponse, request: LLMRequest
+) -> tuple[object, tuple[ToolCall, ...]]:
+    """Turn a provider reply into what the caller asked for, or into calls.
+
+    A model that called a tool did not answer, so there is no text to parse and
+    no schema to satisfy: asking for JSON here would turn a correct reply into
+    a parsing failure and hand a paid-for call to the fallback.
+    """
+    if response.tool_calls:
+        return None, _tool_calls(response, request)
+
     if request.response_format is ResponseFormat.TEXT:
-        return response.output_text or ""
+        return response.output_text or "", ()
 
     payload = parse_json_payload(response.output_text)
     if request.response_format is ResponseFormat.JSON_OBJECT:
-        return payload
+        return payload, ()
 
     schema = request.response_schema
     assert schema is not None  # guaranteed by LLMRequest validation
     try:
-        return schema.model_validate(payload)
+        return schema.model_validate(payload), ()
     except ValidationError as error:
         field_names = _schema_field_names(schema)
         details = []
@@ -480,6 +499,37 @@ def _interpret(response: ProviderResponse, request: LLMRequest) -> object:
             f"the response did not satisfy {schema.__name__}: "
             f"{error.error_count()} violation(s): {'; '.join(details)}"
         ) from error
+
+
+def _tool_calls(response: ProviderResponse, request: LLMRequest) -> tuple[ToolCall, ...]:
+    """Parse and check what the application is about to be asked to run.
+
+    A call it cannot dispatch is a failed attempt, not a result: the provider
+    answered and is still billed for it, and the fallback still gets its turn.
+    Deep schema validation is *not* done here — that needs a JSON Schema
+    validator this package does not depend on, and the application that owns
+    the function has to defend itself anyway. What is checked is what makes a
+    call dispatchable at all: a declared name and a JSON object of arguments.
+
+    No message repeats the arguments. They hold whatever the model was told,
+    which is exactly the material that must not reach a log.
+    """
+    declared = {tool.name for tool in request.tools}
+    calls: list[ToolCall] = []
+    for raw in response.tool_calls:
+        if raw.name not in declared:
+            raise OutputParsingError(
+                f"the provider called {raw.name!r}, which this request did not declare"
+            )
+        # A function taking no arguments is reported as "" by some providers
+        # and as "{}" by others; both mean the same call.
+        arguments = parse_json_payload(raw.arguments) if raw.arguments.strip() else {}
+        if not isinstance(arguments, dict):
+            raise OutputParsingError(
+                f"the arguments for {raw.name!r} are {type(arguments).__name__}, not an object"
+            )
+        calls.append(ToolCall(id=raw.id, name=raw.name, arguments=arguments))
+    return tuple(calls)
 
 
 def _schema_field_names(schema: type[BaseModel]) -> set[str]:

@@ -11,6 +11,30 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Added
 
+- Provider-neutral **function tool calling**: `FunctionTool`, `ToolChoice`,
+  `RequiredTool`, `ToolCall` and `ToolResult`, reached through
+  `LLMRequest.tools`, `LLMRequest.tool_choice` and `LLMRequest.tool_results`,
+  and answered through `LLMResult.tool_calls`. **OpenAI** and **Groq** declare
+  `function_calling=True` — the Responses API's flat tool and `function_call`
+  items, and Chat Completions' nested function and `message.tool_calls` — and
+  Gemini and OpenRouter reject a request carrying tools instead of answering
+  prose where a call was expected.
+
+  The package translates and correlates; it does not execute. An application
+  receives typed calls, runs its own functions under its own permission checks,
+  and supplies typed results in the next request. `ToolResult` holds the
+  `ToolCall` it answers rather than a loose id, so a continuation cannot lose
+  the pairing the providers need back on the wire.
+
+  A tool call is a **successful** attempt: there is no text to parse and no
+  schema to satisfy, and a requested JSON format is not applied to a reply that
+  contains no answer. Arguments that do not parse, that are not a JSON object,
+  or that name a function the request never declared are a **billed failure**,
+  so the fallback still gets its turn and the tokens are still counted — with
+  the arguments themselves kept out of every message and every sink.
+
+  Requests without tools produce the same provider payload as 0.10.1.
+
 - Provider-neutral **image generation and editing**: `ImageRequest`,
   `ImageInput`, `GeneratedImage`, `ImageResult` and `LLMGateway.generate_image()`,
   with the same retry, fallback and attempt accounting as the token and audio

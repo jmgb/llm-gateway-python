@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from llm_gateway.policies import FallbackPolicy, RetryPolicy, RoutingPreference, TimeoutPolicy
 from llm_gateway.pricing import Cost
+from llm_gateway.tools import FunctionTool, RequiredTool, ToolCall, ToolChoice, ToolResult
 from llm_gateway.usage import TokenUsage
 
 Role = Literal["system", "user", "assistant"]
@@ -57,6 +58,12 @@ class LLMRequest:
     model: str
     messages: tuple[Message, ...] = ()
     attachments: tuple[FileAttachment, ...] = ()
+    tools: tuple[FunctionTool, ...] = ()
+    """Functions the model may ask to have run. The package runs none of them."""
+    tool_choice: ToolChoice | RequiredTool | None = None
+    """Unset means the provider's own default, which is ``AUTO`` once tools exist."""
+    tool_results: tuple[ToolResult, ...] = ()
+    """Answers to the calls of a previous turn, replayed with the calls they answer."""
     system_prompt: str | None = None
     response_format: ResponseFormat = ResponseFormat.TEXT
     response_schema: type[BaseModel] | None = None
@@ -91,6 +98,26 @@ class LLMRequest:
             raise ValueError("a model identifier is required")
         if self.attachments and not any(message.role == "user" for message in self.messages):
             raise ValueError("file attachments require at least one user message")
+        self._validate_tools()
+
+    def _validate_tools(self) -> None:
+        """Reject here what a provider would reject after being paid for it."""
+        names: set[str] = set()
+        for tool in self.tools:
+            if tool.name in names:
+                raise ValueError(f"two tools share the name {tool.name!r}")
+            names.add(tool.name)
+
+        if self.tool_choice is not None and not self.tools:
+            raise ValueError("tool_choice needs at least one tool to choose from")
+        if isinstance(self.tool_choice, RequiredTool) and self.tool_choice.name not in names:
+            raise ValueError(f"tool_choice names {self.tool_choice.name!r}, which is not declared")
+
+        seen: set[str] = set()
+        for result in self.tool_results:
+            if result.call.id in seen:
+                raise ValueError(f"two results answer the call {result.call.id!r}")
+            seen.add(result.call.id)
 
 
 class AttemptOutcome(Enum):
@@ -170,6 +197,13 @@ class LLMResult:
     usage: TokenUsage
     execution: Execution
     cost: Cost
+    tool_calls: tuple[ToolCall, ...] = ()
+    """What the model asked to have run instead of answering.
+
+    Never flattened into ``output``: a caller that treats a call as text sends
+    the model's own request for a function straight to a user. When this is
+    non-empty ``output`` is ``None``, and the two are checked separately.
+    """
 
     @property
     def text(self) -> str:
