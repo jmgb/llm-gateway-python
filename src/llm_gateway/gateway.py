@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 from llm_gateway.audio import TranscriptionRequest, TranscriptionResult
 from llm_gateway.audio_gateway import AudioGateway
+from llm_gateway.catalogs import builtin_price_catalog
 from llm_gateway.contracts import (
     Attempt,
     AttemptOutcome,
@@ -45,18 +46,28 @@ from llm_gateway.errors import (
     SchemaValidationError,
 )
 from llm_gateway.json_payload import parse_json_payload
-from llm_gateway.models import ModelInfo, builtin_price_catalog, lookup_model
+from llm_gateway.media import ImageRequest, ImageResult, VideoRequest, VideoResult
+from llm_gateway.media_gateway import ImageGateway, VideoGateway
+from llm_gateway.models import ModelInfo, lookup_model
 from llm_gateway.ports import (
     AlertSink,
     AudioUsageSink,
     EventSink,
+    ImageUsageSink,
     NullAlertSink,
     NullEventSink,
     NullUsageSink,
     UsageSink,
+    VideoUsageSink,
     execution_to_record,
 )
-from llm_gateway.pricing import AudioPriceCatalog, Cost, PriceCatalog
+from llm_gateway.pricing import (
+    AudioPriceCatalog,
+    Cost,
+    ImagePriceCatalog,
+    PriceCatalog,
+    VideoPriceCatalog,
+)
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import TokenUsage
@@ -79,8 +90,12 @@ class LLMGateway:
         registry: ProviderRegistry,
         price_catalog: PriceCatalog | None = None,
         audio_price_catalog: AudioPriceCatalog | None = None,
+        image_price_catalog: ImagePriceCatalog | None = None,
+        video_price_catalog: VideoPriceCatalog | None = None,
         usage_sink: UsageSink | None = None,
         audio_usage_sink: AudioUsageSink | None = None,
+        image_usage_sink: ImageUsageSink | None = None,
+        video_usage_sink: VideoUsageSink | None = None,
         event_sink: EventSink | None = None,
         alert_sink: AlertSink | None = None,
     ) -> None:
@@ -99,10 +114,32 @@ class LLMGateway:
             event_sink=self._events,
             alert_sink=self._alerts,
         )
+        self._images = ImageGateway(
+            registry=registry,
+            price_catalog=image_price_catalog,
+            usage_sink=image_usage_sink,
+            event_sink=self._events,
+            alert_sink=self._alerts,
+        )
+        self._videos = VideoGateway(
+            registry=registry,
+            price_catalog=video_price_catalog,
+            usage_sink=video_usage_sink,
+            event_sink=self._events,
+            alert_sink=self._alerts,
+        )
 
     async def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         """Transcribe audio with duration accounting separate from tokens."""
         return await self._audio.transcribe(request)
+
+    async def generate_image(self, request: ImageRequest) -> ImageResult:
+        """Generate or edit an image, with image accounting separate from tokens."""
+        return await self._images.generate_image(request)
+
+    async def generate_video(self, request: VideoRequest) -> VideoResult:
+        """Generate video, with per-second accounting separate from tokens."""
+        return await self._videos.generate_video(request)
 
     async def generate(self, request: LLMRequest) -> LLMResult:
         """Run the request to completion, or raise a typed error.
@@ -136,6 +173,17 @@ class LLMGateway:
             if info is not None and info.pricing_unit == "audio_minutes":
                 raise ConfigurationError(
                     f"{model!r} is audio-priced; use LLMGateway.transcribe() instead"
+                )
+            # An image model answers with pictures the text path would drop on
+            # the floor: Gemini's image reply carries inline parts and an empty
+            # `.text`, so without this the caller gets a silent empty success.
+            if info is not None and info.modality == "image":
+                raise ConfigurationError(
+                    f"{model!r} generates images; use LLMGateway.generate_image() instead"
+                )
+            if info is not None and info.modality == "video":
+                raise ConfigurationError(
+                    f"{model!r} generates video; use LLMGateway.generate_video() instead"
                 )
         requests_by_model = {model: _request_for_model(request, model) for model in plan}
 

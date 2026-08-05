@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from llm_gateway.audio import AudioAttempt
     from llm_gateway.contracts import Attempt
+    from llm_gateway.media import ImageAttempt, VideoAttempt
 
 
 class LLMGatewayError(Exception):
@@ -108,6 +109,30 @@ class AllTranscriptionsFailed(LLMGatewayError):
     """Every audio model and retry failed, with duration accounting preserved."""
 
     def __init__(self, message: str, *, attempts: tuple[AudioAttempt, ...]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+    @property
+    def last_error(self) -> str | None:
+        return self.attempts[-1].error_type if self.attempts else None
+
+
+class AllImagesFailed(LLMGatewayError):
+    """Every image model and retry failed, with image accounting preserved."""
+
+    def __init__(self, message: str, *, attempts: tuple[ImageAttempt, ...]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+    @property
+    def last_error(self) -> str | None:
+        return self.attempts[-1].error_type if self.attempts else None
+
+
+class AllVideosFailed(LLMGatewayError):
+    """Every video model and retry failed, with video accounting preserved."""
+
+    def __init__(self, message: str, *, attempts: tuple[VideoAttempt, ...]) -> None:
         super().__init__(message)
         self.attempts = attempts
 

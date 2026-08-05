@@ -5,11 +5,14 @@ from decimal import Decimal
 import pytest
 
 from llm_gateway import (
+    AudioRate,
     CostMeasurement,
+    ImageRate,
     ModelRate,
     NullPriceCatalog,
     StaticPriceCatalog,
     TokenUsage,
+    VideoRate,
 )
 
 CATALOG = StaticPriceCatalog(
@@ -108,3 +111,28 @@ def test_rounding_is_half_up_on_whole_microdollars() -> None:
 def test_pricing_version_is_required_to_be_non_empty() -> None:
     with pytest.raises(ValueError, match="pricing version"):
         StaticPriceCatalog(version="", rates={})
+
+
+@pytest.mark.parametrize("field", ["input_microusd_per_token", "output_microusd_per_token"])
+def test_token_rates_cannot_be_negative_or_non_finite(field: str) -> None:
+    values = {
+        "input_microusd_per_token": Decimal("1"),
+        "output_microusd_per_token": Decimal("1"),
+    }
+    for invalid in (Decimal("-1"), Decimal("Infinity"), Decimal("NaN")):
+        values[field] = invalid
+        with pytest.raises(ValueError, match="finite and non-negative"):
+            ModelRate(**values)
+
+
+def test_every_non_token_rate_must_also_be_finite() -> None:
+    infinite = Decimal("Infinity")
+
+    with pytest.raises(ValueError, match="finite"):
+        AudioRate(usd_per_minute=infinite)
+    with pytest.raises(ValueError, match="finite"):
+        ImageRate(usd_per_image=infinite)
+    with pytest.raises(ValueError, match="finite"):
+        VideoRate(usd_per_second=infinite)
+    with pytest.raises(ValueError, match="finite"):
+        VideoRate(usd_per_second_by_resolution={"480p": infinite})

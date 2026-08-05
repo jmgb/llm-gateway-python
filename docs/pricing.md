@@ -28,11 +28,14 @@ asserts it.
 Arithmetic is done in **whole microdollars** with `ROUND_HALF_UP`, so totals
 add up exactly and there is no floating-point drift across many small calls.
 
-The model identity catalogue also supports `pricing_unit="audio_minutes"` for
-speech models. Those entries remain routable and carry their provider's
-per-minute metadata, but `builtin_price_catalog()` excludes them because its
-`TokenUsage` contract cannot represent audio duration. Use
-`builtin_audio_price_catalog()` and `AudioUsage` for that path.
+The catalogue also supports `pricing_unit="audio_minutes"` for speech models,
+`pricing_unit="images"` for image models and `pricing_unit="video_seconds"`
+for video models. Those entries remain routable and carry their provider's own
+rate, but `builtin_price_catalog()` excludes them: its `TokenUsage` contract
+can represent neither a minute, a picture nor a second of footage. Use
+`builtin_audio_price_catalog()` with `AudioUsage`,
+`builtin_image_price_catalog()` with `ImageUsage` and
+`builtin_video_price_catalog()` with `VideoUsage`, for those paths.
 
 ## The three measurements
 
@@ -66,6 +69,8 @@ Providers disagree here, so each adapter normalises at its boundary:
 | OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through |
 | Gemini | `thoughts_token_count`, **outside** `candidates_token_count` | folded into `output_tokens` |
 | AssemblyAI | no token usage; duration belongs to the audio contract | kept out of token pricing |
+| Replicate | no token usage; images are billed per run | kept out of token pricing |
+| WaveSpeed | no token usage; images are billed per image, video per second | kept out of token pricing |
 
 Adding the breakdown back on top of the total is a real bug this package had:
 at a thinking effort where reasoning dominates the visible answer, it
@@ -118,7 +123,7 @@ Negotiated rates, or a model the catalogue does not know yet:
 
 ```python
 from decimal import Decimal
-from llm_gateway.models import builtin_price_catalog
+from llm_gateway.catalogs import builtin_price_catalog
 
 catalog = builtin_price_catalog(
     overrides={"gemini-3.5-flash-lite": (Decimal("0.20"), Decimal("1.80"))},
@@ -154,3 +159,55 @@ amount is an `ESTIMATED` lower-confidence figure. If neither source has a
 duration, cost is `UNAVAILABLE`, never zero. Audio retries and fallbacks are
 represented by `AudioAttempt`/`AudioExecution`; their cost never enters token
 usage or token fallback pricing.
+
+## Image pricing
+
+Image generation is billed in two incompatible ways, and the catalogue records
+which one each model uses rather than picking a single fiction:
+
+| Model | Provider | Unit | Rate |
+|---|---|---|---:|
+| `gemini-3.1-flash-image` | Gemini | tokens | `$0.50` input / `$60` image output per 1M tokens |
+| `gemini-3.1-flash-lite-image` | Gemini | tokens | `$0.25` input / `$30` image output per 1M tokens |
+| `gemini-3-pro-image` | Gemini | tokens | `$2` input / `$120` image output per 1M tokens |
+| `black-forest-labs/flux-kontext-pro` | Replicate | per image | `$0.04` |
+| `wavespeed-ai/hidream-i1-dev` | WaveSpeed | per image | `$0.012` |
+| `prunaai/p-image`, `bytedance/seedream-4` | Replicate | per image | **not published** |
+
+`StaticImagePriceCatalog` reads the model's unit, never the operation's: a
+token-billed model is priced from `ImageUsage.tokens`, a per-image model from
+`ImageUsage.images`. A model with no published rate is left out of the built-in
+table, so its cost is `UNAVAILABLE` — Replicate bills community models by GPU
+second, and a fixed per-image number for them would be a guess presented as a
+fact. Applications that know their own figures inject an `ImagePriceCatalog`.
+
+Gemini's image-output token rate is deliberately separate from its text-output
+rate. Treating the two as one would understate an image invoice by up to 20×.
+WaveSpeed charges `$0.012` per HiDream I1 Dev run at the documented default
+shape.
+
+Image retries and fallbacks are represented by `ImageAttempt`/`ImageExecution`,
+recorded through `ImageUsageSink`, and never enter token usage or token
+fallback pricing.
+
+## Video pricing
+
+Video is billed per second, and the rate depends on the resolution:
+
+| Model | Provider | 480p | 768p |
+|---|---|---:|---:|
+| `wavespeed-ai/minimax-h3/image-to-video` | WaveSpeed | `$0.04` / second | `$0.08` / second |
+
+`StaticVideoPriceCatalog` prices `VideoUsage.seconds` at the rate for
+`VideoUsage.resolution`. A resolution the table does not know — including none
+at all, when the caller left it to the provider's default — yields
+`UNAVAILABLE` rather than the cheaper rate: assuming 480p on a 768p clip would
+halve a real invoice.
+
+WaveSpeed reports no clip length of its own and snaps output to the model's
+frame grid, so its adapter reports the requested duration as an estimate. The
+amount is therefore `ESTIMATED`, never `ACTUAL` — an honest lower-confidence
+figure rather than a measurement nobody took.
+
+Video retries and fallbacks are represented by `VideoAttempt`/`VideoExecution`
+and recorded through `VideoUsageSink`.

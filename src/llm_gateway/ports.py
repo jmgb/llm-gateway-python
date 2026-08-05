@@ -12,8 +12,9 @@ from typing import Protocol, runtime_checkable
 
 from llm_gateway.audio import AudioExecution
 from llm_gateway.contracts import Execution
-from llm_gateway.pricing import AudioCost, Cost
-from llm_gateway.usage import AudioUsage, TokenUsage
+from llm_gateway.media import ImageExecution, VideoExecution
+from llm_gateway.pricing import AudioCost, Cost, ImageCost, VideoCost
+from llm_gateway.usage import AudioUsage, ImageUsage, TokenUsage, VideoUsage
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,40 @@ class AudioUsageRecord:
     succeeded: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ImageUsageRecord:
+    """Image accounting, in whichever unit the model is billed by."""
+
+    request_id: str | None
+    source: str | None
+    provider: str
+    requested_model: str
+    model_used: str
+    usage: ImageUsage
+    cost: ImageCost
+    attempts: int
+    fallback_used: bool
+    latency_ms: int
+    succeeded: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VideoUsageRecord:
+    """Video accounting, billed by the second rather than by the token."""
+
+    request_id: str | None
+    source: str | None
+    provider: str
+    requested_model: str
+    model_used: str
+    usage: VideoUsage
+    cost: VideoCost
+    attempts: int
+    fallback_used: bool
+    latency_ms: int
+    succeeded: bool
+
+
 @runtime_checkable
 class UsageSink(Protocol):
     """Where token and cost accounting goes: a ledger, a metric, a log line."""
@@ -63,6 +98,20 @@ class AudioUsageSink(Protocol):
     """Where transcription duration and cost accounting goes."""
 
     def record(self, usage: AudioUsageRecord) -> None: ...
+
+
+@runtime_checkable
+class ImageUsageSink(Protocol):
+    """Where image count and cost accounting goes."""
+
+    def record(self, usage: ImageUsageRecord) -> None: ...
+
+
+@runtime_checkable
+class VideoUsageSink(Protocol):
+    """Where video duration and cost accounting goes."""
+
+    def record(self, usage: VideoUsageRecord) -> None: ...
 
 
 @runtime_checkable
@@ -86,6 +135,16 @@ class NullUsageSink:
 
 class NullAudioUsageSink:
     def record(self, usage: AudioUsageRecord) -> None:
+        return None
+
+
+class NullImageUsageSink:
+    def record(self, usage: ImageUsageRecord) -> None:
+        return None
+
+
+class NullVideoUsageSink:
+    def record(self, usage: VideoUsageRecord) -> None:
         return None
 
 
@@ -121,6 +180,54 @@ def execution_to_record(
         fallback_used=execution.fallback_used,
         latency_ms=execution.latency_ms,
         finish_reason=execution.finish_reason,
+        succeeded=succeeded,
+    )
+
+
+def image_execution_to_record(
+    execution: ImageExecution,
+    *,
+    usage: ImageUsage,
+    cost: ImageCost,
+    request_id: str | None,
+    source: str | None,
+    succeeded: bool,
+) -> ImageUsageRecord:
+    return ImageUsageRecord(
+        request_id=request_id,
+        source=source,
+        provider=execution.provider,
+        requested_model=execution.requested_model,
+        model_used=execution.model_used,
+        usage=usage,
+        cost=cost,
+        attempts=execution.attempt_count,
+        fallback_used=execution.fallback_used,
+        latency_ms=execution.latency_ms,
+        succeeded=succeeded,
+    )
+
+
+def video_execution_to_record(
+    execution: VideoExecution,
+    *,
+    usage: VideoUsage,
+    cost: VideoCost,
+    request_id: str | None,
+    source: str | None,
+    succeeded: bool,
+) -> VideoUsageRecord:
+    return VideoUsageRecord(
+        request_id=request_id,
+        source=source,
+        provider=execution.provider,
+        requested_model=execution.requested_model,
+        model_used=execution.model_used,
+        usage=usage,
+        cost=cost,
+        attempts=execution.attempt_count,
+        fallback_used=execution.fallback_used,
+        latency_ms=execution.latency_ms,
         succeeded=succeeded,
     )
 

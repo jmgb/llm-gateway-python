@@ -15,14 +15,18 @@ from typing import Any
 
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
+from llm_gateway.errors import ConfigurationError, ProviderError
+from llm_gateway.media import GeneratedImage, ImageRequest, ProviderImageResponse
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.validation import reject_file_attachments
-from llm_gateway.usage import TokenUsage
+from llm_gateway.usage import ImageUsage, TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=True,
     json_mode=True,
+    image_generation=True,
+    image_editing=True,
     # Gemini serves all three; the neutral request cannot express any of them
     # yet, and a capability no caller can reach is a promise that answers
     # nothing. See tests/contract/test_capability_honesty.py.
@@ -66,6 +70,43 @@ class GeminiAdapter:
             model_used=getattr(raw, "model_version", None),
         )
 
+    async def generate_image(self, request: ImageRequest, *, model: str) -> ProviderImageResponse:
+        """Translate to ``generate_content`` asking for the image modality.
+
+        Gemini answers a text description often enough that a reply without
+        inline data is treated as a provider failure: returning it as an empty
+        success is how a caller ends up showing the user nothing.
+        """
+        parts: list[dict[str, Any]] = [{"text": request.prompt}]
+        if request.image is not None:
+            if request.image.data is None:
+                raise ConfigurationError(
+                    "Gemini needs the source image as bytes; it does not fetch a URL"
+                )
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": request.image.mime_type or "image/png",
+                        "data": request.image.data,
+                    }
+                }
+            )
+
+        config: dict[str, Any] = {"response_modalities": ["IMAGE"]}
+        if request.aspect_ratio is not None:
+            config["image_config"] = {"aspect_ratio": request.aspect_ratio}
+
+        try:
+            raw = await self._client.aio.models.generate_content(
+                model=model,
+                contents=[{"role": "user", "parts": parts}],
+                config=config,
+            )
+        except Exception as error:
+            raise classify_provider_error(error) from None
+
+        return _image_response(raw, model=model)
+
     def _build_config(self, request: LLMRequest, *, model: str) -> dict[str, Any]:
         config: dict[str, Any] = {}
         if request.system_prompt:
@@ -85,6 +126,39 @@ class GeminiAdapter:
             config["response_mime_type"] = "application/json"
             config["response_json_schema"] = schema.model_json_schema()
         return config
+
+
+_BLOCKING_FINISH_REASONS = ("SAFETY", "PROHIBITED", "RECITATION", "BLOCKLIST", "SPII")
+
+
+def _image_response(raw: Any, *, model: str) -> ProviderImageResponse:
+    candidates = getattr(raw, "candidates", None) or ()
+    candidate = candidates[0] if candidates else None
+    if candidate is None:
+        raise ProviderError("Gemini returned no candidate for the image request")
+
+    reason = str(getattr(candidate, "finish_reason", "") or "")
+    content = getattr(candidate, "content", None)
+    parts = getattr(content, "parts", None) or ()
+    images = tuple(
+        GeneratedImage(
+            data=part.inline_data.data,
+            mime_type=getattr(part.inline_data, "mime_type", None),
+        )
+        for part in parts
+        if getattr(part, "inline_data", None) is not None
+    )
+    if not images:
+        if any(blocked in reason.upper() for blocked in _BLOCKING_FINISH_REASONS):
+            raise ProviderError(f"Gemini blocked the image generation: {reason}")
+        raise ProviderError(f"Gemini returned no image (finish reason: {reason or 'unknown'})")
+
+    tokens = _usage(getattr(raw, "usage_metadata", None))
+    return ProviderImageResponse(
+        images=images,
+        usage=ImageUsage(images=len(images), tokens=tokens),
+        model_used=getattr(raw, "model_version", None) or model,
+    )
 
 
 def _is_gemini_3(model: str) -> bool:

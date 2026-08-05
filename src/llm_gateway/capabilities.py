@@ -20,6 +20,14 @@ class ProviderCapabilities:
     inline_files: bool = False
     remote_files: bool = False
     audio_transcription: bool = False
+    image_generation: bool = False
+    image_editing: bool = False
+    """Generating from a prompt and editing an existing image are separate:
+    WaveSpeed's text-to-image endpoint does the first and not the second."""
+    video_generation: bool = False
+    video_from_image: bool = False
+    """The same split for video: a text-to-video model cannot animate a first
+    frame it was not built to accept."""
     reasoning_effort: bool = False
     conversation_history: bool = True
     reports_token_usage: bool = True

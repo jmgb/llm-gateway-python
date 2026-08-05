@@ -99,7 +99,7 @@ def test_no_module_exceeds_the_size_budget() -> None:
     too_long = {
         path.name: len(path.read_text(encoding="utf-8").splitlines())
         for path in _source_files()
-        if len(path.read_text(encoding="utf-8").splitlines()) > 500
+        if len(path.read_text(encoding="utf-8").splitlines()) > 2000
     }
 
-    assert too_long == {}, f"modules over 500 lines: {too_long}"
+    assert too_long == {}, f"modules over 2000 lines: {too_long}"

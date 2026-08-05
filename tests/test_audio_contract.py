@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from llm_gateway import AudioInput, TranscriptionRequest
+from llm_gateway import AudioInput, AudioUsage, TranscriptionRequest
 
 
 def test_audio_input_can_carry_bytes_and_duration_without_token_fields() -> None:
@@ -54,3 +54,9 @@ def test_transcription_does_not_assume_a_product_language() -> None:
     request = TranscriptionRequest(model="gpt-transcribe", audio=AudioInput(data=b"audio"))
 
     assert request.language is None
+
+
+@pytest.mark.parametrize("duration", [-1.0, float("inf"), float("nan")])
+def test_reported_audio_usage_must_be_non_negative_and_finite(duration: float) -> None:
+    with pytest.raises(ValueError, match="non-negative and finite"):
+        AudioUsage(duration_seconds=duration)

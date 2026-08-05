@@ -1,5 +1,7 @@
 """Token usage must distinguish "no usage reported" from "zero tokens used"."""
 
+import pytest
+
 from llm_gateway import TokenUsage
 
 
@@ -61,3 +63,23 @@ def test_aggregating_unknown_usage_taints_the_total() -> None:
 
     assert total.complete is False
     assert total.input_tokens == 10
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "retrieved_document_tokens",
+        "cached_input_tokens",
+    ],
+)
+def test_token_counts_cannot_be_negative(field: str) -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        TokenUsage(**{field: -1})  # type: ignore[arg-type]
+
+
+def test_reasoning_cannot_exceed_the_output_total() -> None:
+    with pytest.raises(ValueError, match="reasoning"):
+        TokenUsage(output_tokens=4, reasoning_tokens=5)

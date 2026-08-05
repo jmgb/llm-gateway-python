@@ -237,3 +237,64 @@
   - `../VirtualAssistant/tests/unit/test_gpt_request_tools.py`
   - `../VirtualAssistant/tests/integration/test_audio_pipeline_e2e.py`
   - `../sofia-financial-reports/sofia/handlers/document_ocr.py`
+
+## Image and video generation
+
+- [x] **P3 — Add provider-neutral image generation and editing.**
+
+  Shipped as `ImageRequest`/`ImageResult`, `LLMGateway.generate_image()` and
+  the Gemini, Replicate and WaveSpeed adapters, with image usage and cost kept
+  out of token accounting. See `[Unreleased]` in `CHANGELOG.md` and the image
+  sections of `README.md` and `docs/pricing.md`.
+
+- [~] **P4 — Add provider-neutral video generation.** WaveSpeed's polled
+  image-to-video is shipped (`VideoRequest`, `LLMGateway.generate_video()`,
+  per-second cost by resolution). What remains is below: the webhook-shaped
+  providers.
+
+  ### Why this belongs in the package
+
+  Two applications already generate video against the same two providers:
+
+  - VirtualAssistant (`modules/replicate_client.py`) creates Replicate
+    predictions for `wan-video/wan-2.2-5b-fast`, both text-to-video and
+    image-to-video, and polls or receives a webhook.
+  - Apps (`backend/app/services/replicate_client.py`, `sora_client.py`,
+    `video_generation_router.py`) runs the same Wan model plus OpenAI Sora 2,
+    behind a router that picks the client by model id — the product-side shape
+    of what the catalogue would decide here.
+
+  The shared problem is again transport and normalisation: submitting a job,
+  correlating its id, reading its status, and pricing it per second of video.
+
+  ### What still has to be built
+
+  Replicate (Wan 2.2) and OpenAI (Sora 2), which is where the two-phase
+  contract becomes unavoidable.
+
+  ### What makes it a different contract from images
+
+  A video is not returned by the call that requests it. Both providers answer
+  with a job id and finish minutes later, so the neutral contract is two
+  phases — `submit()` returning a `VideoJob`, and `poll(job)` returning status
+  and result — and the polling loop, the webhook endpoint and the storage stay
+  with the application. Wrapping it in one `await` would put a four-minute
+  timeout inside `TimeoutPolicy` and make a webhook impossible.
+
+  Sora adds a second wrinkle: the finished MP4 is served from
+  `/v1/videos/{id}/content` **with** the Authorization header, so the adapter
+  must either return bytes or expose the headers needed to fetch it. A URL
+  alone would be undownloadable by the caller.
+
+  ### Cost
+
+  Sora publishes a per-second rate ($0.10/second at 720p for `sora-2`);
+  Replicate bills Wan by GPU time. So the catalogue needs
+  `pricing_unit="video_seconds"` for the first and no rate for the second,
+  reporting `UNAVAILABLE` rather than a guess — the same rule the image
+  catalogue already follows.
+
+  ### Out of scope, as with images
+
+  Prompt enrichment, moderation policy, per-user quotas, storage, thumbnails,
+  re-hosting and the webhook endpoint itself.

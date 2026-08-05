@@ -12,6 +12,7 @@ from llm_gateway.audio import (
     TranscriptionRequest,
     TranscriptionResult,
 )
+from llm_gateway.catalogs import builtin_audio_price_catalog
 from llm_gateway.contracts import AttemptOutcome, FailurePhase
 from llm_gateway.errors import (
     AllTranscriptionsFailed,
@@ -20,7 +21,7 @@ from llm_gateway.errors import (
     ProviderError,
     ProviderTimeoutError,
 )
-from llm_gateway.models import builtin_audio_price_catalog, lookup_model
+from llm_gateway.models import lookup_model
 from llm_gateway.ports import (
     AlertSink,
     AudioUsageSink,

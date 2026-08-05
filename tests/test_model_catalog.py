@@ -10,11 +10,11 @@ from decimal import Decimal
 import pytest
 
 from llm_gateway import AudioUsage, CostMeasurement, TokenUsage, builtin_audio_price_catalog
+from llm_gateway.catalogs import builtin_price_catalog
 from llm_gateway.models import (
     CATALOG_VERSION,
     MODEL_CATALOG,
     ModelInfo,
-    builtin_price_catalog,
     lookup_model,
     models_by_provider,
     resolve_provider,
@@ -47,7 +47,7 @@ class TestIdentity:
         legacy = {
             "gemini-3-flash-preview",
             "gemini-3-pro-preview",
-            "gemini-3-pro-image",
+            "gemini-3.1-flash-image-preview",
             "deepseek/deepseek-chat-v3.1",
             "deepseek/deepseek-r1-distill-qwen-7b",
             "google/gemini-3-flash-preview",
@@ -66,6 +66,23 @@ class TestIdentity:
 
         assert legacy <= MODEL_CATALOG.keys()
         assert all(MODEL_CATALOG[model_id].deprecated for model_id in legacy)
+
+    def test_current_gemini_image_models_are_not_marked_legacy(self) -> None:
+        for model_id in (
+            "gemini-3-pro-image",
+            "gemini-3.1-flash-image",
+            "gemini-3.1-flash-lite-image",
+        ):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.deprecated is False
+
+    def test_wavespeed_models_use_their_complete_provider_ids(self) -> None:
+        info = lookup_model("wavespeed-ai/hidream-i1-dev")
+
+        assert info is not None
+        assert info.provider == "wavespeed"
+        assert info.image_usd_per_image == Decimal("0.012")
 
     def test_current_openai_audio_models_use_their_current_ids(self) -> None:
         expected = {
@@ -117,7 +134,15 @@ class TestIdentity:
         assert lookup_model("some-model-that-does-not-exist") is None
 
     def test_every_entry_declares_a_provider_the_package_can_serve(self) -> None:
-        servable = {"openai", "gemini", "groq", "openrouter", "assemblyai"}
+        servable = {
+            "openai",
+            "gemini",
+            "groq",
+            "openrouter",
+            "assemblyai",
+            "replicate",
+            "wavespeed",
+        }
 
         for model_id, info in MODEL_CATALOG.items():
             assert info.provider in servable, f"{model_id} has provider {info.provider}"
@@ -338,8 +363,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-04.5"
-    PRICE_FINGERPRINT = "5558060fe5cc43e012ed838e819a3b9c0e8a0e97e7a65618c59a3ef82119aafe"
+    PRICED_AT_VERSION = "2026-08-05.2"
+    PRICE_FINGERPRINT = "7cb3b8ff3cd3387b89b61ca98643d411fbb08fdf05a7ea08871169c9df064331"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -349,11 +374,20 @@ class TestPricesAndVersionMoveTogether:
         fires on a rate that moved, never on a literal that was retyped.
         """
         micro = Decimal("0.000001")
+
+        def by_resolution(info: ModelInfo) -> list[tuple[str, str]]:
+            rates = info.video_usd_per_second_by_resolution
+            return sorted((name, str(rate.quantize(micro))) for name, rate in rates.items())
+
         priced = sorted(
             f"{info.id}\t{info.pricing_unit}"
             f"\t{info.input_usd_per_mtok.quantize(micro)}"
             f"\t{info.output_usd_per_mtok.quantize(micro)}"
             f"\t{(info.audio_usd_per_minute or Decimal('0')).quantize(micro)}"
+            f"\t{(info.image_usd_per_image or Decimal('0')).quantize(micro)}"
+            f"\t{(info.image_output_usd_per_mtok or Decimal('0')).quantize(micro)}"
+            f"\t{(info.video_usd_per_second or Decimal('0')).quantize(micro)}"
+            f"\t{by_resolution(info)}"
             for info in MODEL_CATALOG.values()
         )
         return hashlib.sha256("\n".join(priced).encode()).hexdigest()

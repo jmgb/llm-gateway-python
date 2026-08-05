@@ -20,6 +20,8 @@ from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.openrouter import OpenRouterAdapter
+from llm_gateway.providers.replicate import ReplicateAdapter
+from llm_gateway.providers.wavespeed import WaveSpeedAdapter, WaveSpeedHttpClient
 from llm_gateway.registry import ProviderRegistry
 
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
@@ -39,6 +41,11 @@ OPENROUTER_MODEL_PREFIXES = ("openrouter/",)
 provider, while uncatalogued vendor namespaces are rejected. Only OpenRouter's
 own provider-prefixed ids need a fallback prefix."""
 ASSEMBLYAI_MODEL_PREFIXES = ("assemblyai-",)
+IMAGE_MODEL_PREFIXES: tuple[str, ...] = ()
+"""Empty on purpose. Replicate and WaveSpeed model ids are vendor namespaces
+(``bytedance/``, ``prunaai/``) that say nothing about who serves them, so their
+models route by catalogue entry only. Registering an uncatalogued slug is the
+application's call: ``registry.register(adapter, model_prefixes=("prunaai/",))``."""
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -111,6 +118,26 @@ def create_assemblyai_client(*, api_key: str) -> Any:
     return AssemblyAIHttpClient(api_key=api_key)
 
 
+def create_replicate_client(*, api_key: str) -> Any:
+    """Build a ``replicate.Client``."""
+    _require_key(api_key)
+    try:
+        import replicate
+    except ImportError as error:
+        raise ProviderNotInstalled.for_provider("replicate") from error
+    return replicate.Client(api_token=api_key)
+
+
+def create_wavespeed_client(*, api_key: str) -> Any:
+    """Build the small REST client used by the WaveSpeed adapter."""
+    _require_key(api_key)
+    try:
+        __import__("httpx")
+    except ImportError as error:
+        raise ProviderNotInstalled.for_provider("wavespeed") from error
+    return WaveSpeedHttpClient(api_key=api_key)
+
+
 def build_registry(
     *,
     openai_client: Any | None = None,
@@ -118,6 +145,8 @@ def build_registry(
     groq_client: Any | None = None,
     openrouter_client: Any | None = None,
     assemblyai_client: Any | None = None,
+    replicate_client: Any | None = None,
+    wavespeed_client: Any | None = None,
     extra_openai_prefixes: tuple[str, ...] = (),
 ) -> ProviderRegistry:
     """Register the adapters for the clients the application supplies.
@@ -144,6 +173,10 @@ def build_registry(
         registry.register(
             AssemblyAIAdapter(assemblyai_client), model_prefixes=ASSEMBLYAI_MODEL_PREFIXES
         )
+    if replicate_client is not None:
+        registry.register(ReplicateAdapter(replicate_client), model_prefixes=IMAGE_MODEL_PREFIXES)
+    if wavespeed_client is not None:
+        registry.register(WaveSpeedAdapter(wavespeed_client), model_prefixes=IMAGE_MODEL_PREFIXES)
 
     if not registry.provider_names:
         raise ValueError("build_registry needs at least one client")

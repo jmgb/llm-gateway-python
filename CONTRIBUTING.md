@@ -22,8 +22,8 @@ is what makes a good general design possible — and what stops this package fro
 slowly becoming the thousand-line function it was extracted from.
 
 If you need something only you need, the ports (`UsageSink`, `AudioUsageSink`,
-`EventSink`, `AlertSink`, `PriceCatalog`, `AudioPriceCatalog`) are there so you
-don't have to fork.
+`ImageUsageSink`, `EventSink`, `AlertSink`, `PriceCatalog`, `AudioPriceCatalog`,
+`ImagePriceCatalog`) are there so you don't have to fork.
 
 ## Tooling
 
@@ -117,6 +117,15 @@ errors and honest capabilities. Its duration rate belongs in the audio table,
 and unsupported fields such as prompts or speaker labels must raise instead of
 being silently discarded.
 
+An image provider follows it too, with one extra decision: mark its models
+`modality="image"` so `generate()` refuses them, and state how they are billed.
+`pricing_unit="images"` carries a per-image rate; a provider that bills the
+picture as tokens keeps `pricing_unit="tokens"` and is priced from
+`ImageUsage.tokens`. Where no rate is published, leave it out — an
+`UNAVAILABLE` cost is the honest answer and a guessed one is not. The form of
+the source image is the provider's: reject the one it cannot use rather than
+downloading or hosting it, which is application work.
+
 An OpenAI-compatible API is **not** on its own a reason to skip all this. It
 decides the transport, not the provider. Ask instead:
 
@@ -136,7 +145,8 @@ deployment, vLLM, your own gateway — widened with
 ## Adding or updating a model price
 
 Edit `src/llm_gateway/models.py`, bump `CATALOG_VERSION`, and note it in the
-changelog. Prices are declared in USD per million tokens. Never delete a model
+changelog. `src/llm_gateway/catalogs.py` turns that table into the token, audio
+and image price catalogues; a new pricing unit is a change there too. Prices are declared in USD per million tokens. Never delete a model
 that consumers may still call — mark it `deprecated=True`.
 
 The version is not optional bookkeeping: it travels with every recorded amount

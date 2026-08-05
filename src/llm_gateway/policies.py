@@ -86,9 +86,9 @@ class FallbackPolicy:
             raise ValueError(
                 f"{model!r} is not in the catalogue, so no fallback can be derived from it"
             )
-        if current.pricing_unit != "tokens":
+        if current.pricing_unit != "tokens" or current.modality != "text":
             raise ValueError(
-                f"{model!r} uses {current.pricing_unit} pricing, "
+                f"{model!r} uses {current.pricing_unit} pricing for {current.modality}, "
                 "so no token fallback can be derived"
             )
 
@@ -100,6 +100,7 @@ class FallbackPolicy:
             candidate
             for candidate in models_by_provider(current.provider)
             if candidate.pricing_unit == "tokens"
+            and candidate.modality == "text"
             and not candidate.deprecated
             and candidate.id != current.id
             and total_price(candidate) < total_price(current)

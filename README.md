@@ -69,9 +69,10 @@ uv add "neutral-llm-gateway[gemini]"
 pip install "neutral-llm-gateway[gemini]"
 ```
 
-Available extras: `openai`, `gemini`, `groq`, `assemblyai`, `openrouter`, `all`.
-Combine them as `[openai,assemblyai]`. `openrouter` installs the `openai` SDK,
-and `assemblyai` installs the small HTTP transport used by its REST adapter.
+Available extras: `openai`, `gemini`, `groq`, `assemblyai`, `openrouter`,
+`replicate`, `wavespeed`, `all`. Combine them as `[openai,assemblyai]`.
+`openrouter` installs the `openai` SDK, and `assemblyai` and `wavespeed`
+install the small HTTP transport used by their REST adapters.
 
 Importing the package with no extra installed works by design; asking for a
 provider you have not installed raises a typed error naming the exact extra.
@@ -178,6 +179,82 @@ AssemblyAI Universal-3 Pro supports `prompt` and speaker labels; OpenAI and
 Groq reject speaker labels rather than ignoring them. Fallbacks are explicit
 through `FallbackPolicy.models_in_order(...)`.
 
+### Image generation
+
+Images are a separate operation too, for the same reason: the output is bytes
+or a URL, and providers bill it either per image or with image-output tokens
+whose rate can differ from text output.
+
+```python
+from llm_gateway import ImageInput, ImageRequest, LLMGateway
+from llm_gateway.factories import build_registry, create_gemini_client
+
+gateway = LLMGateway(
+    registry=build_registry(gemini_client=create_gemini_client(api_key=my_key)),
+)
+result = await gateway.generate_image(
+    ImageRequest(
+        model="gemini-3.1-flash-image",
+        prompt="a cat wearing a hat, studio lighting",
+        image=ImageInput(data=original_bytes, mime_type="image/jpeg"),  # optional: an edit
+        source="whatsapp-image",
+    )
+)
+
+result.images[0].data  # bytes from Gemini; `.url` from Replicate and WaveSpeed
+result.usage.images
+result.cost.amount_usd  # per image, or per token where the model bills that way
+```
+
+Which form comes back is the provider's, not a choice: Gemini returns inline
+bytes, Replicate and WaveSpeed return a URL. Downloading it, re-hosting it,
+watermarking it and enforcing a per-user quota stay in the application, exactly
+as decoding audio does.
+
+Editing needs a source image in the form the provider accepts — bytes for
+Gemini, a URL for Replicate — and an adapter that cannot use the form it was
+given raises rather than dropping it. WaveSpeed's text-to-image models refuse
+an edit outright. Sending an image model through `generate()` raises too: its
+reply carries no text, and returning it as an empty success is the failure this
+separation exists to prevent.
+
+### Video generation
+
+Video is a third seam, billed by the second:
+
+```python
+from llm_gateway import ImageInput, LLMGateway, VideoRequest
+from llm_gateway.factories import build_registry, create_wavespeed_client
+
+gateway = LLMGateway(
+    registry=build_registry(wavespeed_client=create_wavespeed_client(api_key=my_key)),
+)
+result = await gateway.generate_video(
+    VideoRequest(
+        model="wavespeed-ai/minimax-h3/image-to-video",
+        prompt="the lioness sprints and leaps at the gazelle",
+        image=ImageInput(data=first_frame_bytes, mime_type="image/png"),
+        resolution="480p",
+        duration_seconds=5,
+        source="wildlife-clip",
+    )
+)
+
+result.videos[0].url
+result.usage.seconds, result.usage.resolution
+result.cost.amount_usd  # per second, at the rate for that resolution
+```
+
+The first frame may be bytes or a URL — WaveSpeed accepts an inline data URI,
+which is what lets an image from one provider be animated by another without
+hosting it anywhere first.
+
+A clip takes minutes, so `VideoRequest` defaults to a fifteen-minute total
+budget and the adapter owns the provider's polling loop. Resolution is part of
+usage rather than a detail of the request because the rate depends on it: a
+resolution the price table does not know costs `UNAVAILABLE`, never the
+cheaper rate.
+
 ## The guarantees
 
 These are enforced by tests, not by convention:
@@ -217,6 +294,8 @@ that application's local adapter.
 | Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the schema is described in the messages and the gateway validates after |
 | AssemblyAI | `[assemblyai]` | REST submit/poll transcription API |
 | OpenRouter | `[openrouter]` | Chat Completions. Aggregator: declares the floor every route honours, not the best case |
+| Replicate | `[replicate]` | Image generation and editing. Answers with a URL, and fetches the source image from one |
+| WaveSpeed | `[wavespeed]` | REST submit/poll. Text-to-image, and image-to-video billed per second |
 
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
@@ -239,7 +318,10 @@ says "json" is left as it is.
 and the Responses adapter appends them to the last user message as
 `input_file` parts. Providers without that capability reject the request rather
 than silently dropping the files. OpenAI, Groq and AssemblyAI expose
-`audio_transcription=True` through the separate `TranscriptionRequest` API.
+`audio_transcription=True` through the separate `TranscriptionRequest` API,
+and Gemini, Replicate and WaveSpeed expose `image_generation=True` through
+`ImageRequest`. WaveSpeed also declares `video_generation=True` and
+`video_from_image=True`, reached through `VideoRequest`.
 
 Request options are adapted per model before each API attempt. A model that
 rejects `temperature` — the OpenAI 5.6 family — never receives it, including
@@ -291,15 +373,21 @@ The package ships a versioned table of models — provider, and price in USD per
 million tokens — used by default, so a call is priced without you wiring
 anything up. Audio models such as `gpt-transcribe`, Whisper and AssemblyAI are
 catalogued with their duration unit and priced through a separate
-`AudioPriceCatalog`. Override prices for negotiated rates, or implement either
+`AudioPriceCatalog`; image models carry their per-image rate, or their token
+rate where the provider bills images as tokens, and are priced through an
+`ImagePriceCatalog`; video models carry a per-second rate that depends on the
+resolution and are priced through a `VideoPriceCatalog`. Override prices for negotiated rates, or implement either
 catalog protocol yourself. See
 [`docs/pricing.md`](docs/pricing.md).
 
 ## Not in this version
 
 Tools/function calling, inline files, streaming and Gemini File Search remain
-absent. Remote file IDs for OpenAI and audio transcription are supported with
-their own capability and cost contracts.
+absent, and so does any video provider that answers only through a webhook —
+`VideoRequest` polls, so Replicate's predictions and Sora's jobs need a
+two-phase contract this version does not have. Remote file IDs for OpenAI,
+audio transcription, image generation and polled video generation are
+supported with their own capability and cost contracts.
 
 ## Documentation
 

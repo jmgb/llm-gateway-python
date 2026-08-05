@@ -13,6 +13,8 @@ from llm_gateway.factories import (
     create_groq_client,
     create_openai_client,
     create_openrouter_client,
+    create_replicate_client,
+    create_wavespeed_client,
 )
 
 
@@ -67,6 +69,41 @@ def test_openrouter_names_its_own_extra_even_though_it_ships_no_sdk(
 
     with pytest.raises(ProviderNotInstalled, match=r"\[openrouter\]"):
         create_openrouter_client(api_key="unused")
+
+
+def test_the_image_providers_name_their_own_extras(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "replicate", None)
+    with pytest.raises(ProviderNotInstalled, match=r"\[replicate\]"):
+        create_replicate_client(api_key="unused")
+
+    monkeypatch.setitem(sys.modules, "httpx", None)
+    with pytest.raises(ProviderNotInstalled, match=r"\[wavespeed\]"):
+        create_wavespeed_client(api_key="unused")
+
+
+def test_the_wavespeed_client_carries_the_key_as_a_bearer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "httpx", ModuleType("httpx"))
+
+    client = create_wavespeed_client(api_key="wave-key")
+
+    assert client._headers == {"Authorization": "Bearer wave-key"}
+
+
+def test_image_models_route_to_their_provider_without_any_prefix() -> None:
+    """Their ids are vendor namespaces, so only the catalogue can place them."""
+    from types import SimpleNamespace
+
+    registry = build_registry(
+        gemini_client=SimpleNamespace(),
+        replicate_client=SimpleNamespace(),
+        wavespeed_client=SimpleNamespace(),
+    )
+
+    assert registry.resolve("prunaai/p-image").name == "replicate"
+    assert registry.resolve("wavespeed-ai/hidream-i1-dev").name == "wavespeed"
+    assert registry.resolve("gemini-3.1-flash-image").name == "gemini"
 
 
 def test_an_empty_api_key_is_rejected_before_importing_anything() -> None:

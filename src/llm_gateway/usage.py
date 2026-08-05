@@ -8,6 +8,7 @@ a complete measurement. Cost estimation depends on that distinction.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 
 
@@ -29,6 +30,23 @@ class TokenUsage:
     cached_input_tokens: int | None = None
     partial_aggregate: bool = False
     """Set when this total absorbed an attempt that reported nothing."""
+
+    def __post_init__(self) -> None:
+        counts = (
+            self.input_tokens,
+            self.output_tokens,
+            self.reasoning_tokens,
+            self.retrieved_document_tokens,
+            self.cached_input_tokens,
+        )
+        if any(count is not None and count < 0 for count in counts):
+            raise ValueError("token counts must be non-negative")
+        if (
+            self.output_tokens is not None
+            and self.reasoning_tokens is not None
+            and self.reasoning_tokens > self.output_tokens
+        ):
+            raise ValueError("reasoning tokens cannot exceed output tokens")
 
     @classmethod
     def unknown(cls) -> TokenUsage:
@@ -83,6 +101,97 @@ class TokenUsage:
 
 
 @dataclass(frozen=True, slots=True)
+class ImageUsage:
+    """What an image generation produced, in whichever unit bills it.
+
+    Providers disagree about the unit: Replicate and WaveSpeed charge per
+    image, Gemini charges the same tokens as a text call. Both are reported,
+    and the price catalogue decides which one applies to the model — so an
+    adapter never has to know how its provider is billed.
+    """
+
+    images: int | None = None
+    tokens: TokenUsage | None = None
+    """Only providers that bill image generation as tokens report this."""
+    partial_aggregate: bool = False
+
+    def __post_init__(self) -> None:
+        if self.images is not None and self.images < 0:
+            raise ValueError("image count must be non-negative")
+
+    @classmethod
+    def unknown(cls) -> ImageUsage:
+        return cls()
+
+    @property
+    def complete(self) -> bool:
+        if self.partial_aggregate or self.images is None:
+            return False
+        return self.tokens is None or self.tokens.complete
+
+    def merge(self, other: ImageUsage) -> ImageUsage:
+        images = _add(self.images, other.images)
+        if self.tokens is None:
+            tokens = other.tokens
+        elif other.tokens is None:
+            tokens = self.tokens
+        else:
+            tokens = self.tokens.merge(other.tokens)
+        return ImageUsage(
+            images=images,
+            tokens=tokens,
+            partial_aggregate=not (self.complete and other.complete),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VideoUsage:
+    """What a video generation produced, in the unit that bills it.
+
+    Seconds are the billable dimension for every provider seen so far, and
+    ``resolution`` is part of usage rather than of the request because the
+    rate depends on it: MiniMax H3 costs twice as much at 768p as at 480p, and
+    a provider may snap the clip to its own frame grid.
+    """
+
+    seconds: float | None = None
+    videos: int | None = None
+    resolution: str | None = None
+    partial_aggregate: bool = False
+
+    def __post_init__(self) -> None:
+        if self.seconds is not None and (self.seconds < 0 or not math.isfinite(self.seconds)):
+            raise ValueError("video seconds must be non-negative and finite")
+        if self.videos is not None and self.videos < 0:
+            raise ValueError("video count must be non-negative")
+
+    @classmethod
+    def unknown(cls) -> VideoUsage:
+        return cls()
+
+    @property
+    def complete(self) -> bool:
+        return self.seconds is not None and not self.partial_aggregate
+
+    def merge(self, other: VideoUsage) -> VideoUsage:
+        if self.seconds is None and other.seconds is None:
+            seconds = None
+        else:
+            seconds = (self.seconds or 0.0) + (other.seconds or 0.0)
+        resolutions_conflict = (
+            self.resolution is not None
+            and other.resolution is not None
+            and self.resolution != other.resolution
+        )
+        return VideoUsage(
+            seconds=seconds,
+            videos=_add(self.videos, other.videos),
+            resolution=(self.resolution if self.resolution == other.resolution else None),
+            partial_aggregate=not (self.complete and other.complete) or resolutions_conflict,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AudioUsage:
     """Audio duration reported by a transcription provider.
 
@@ -93,6 +202,12 @@ class AudioUsage:
 
     duration_seconds: float | None = None
     partial_aggregate: bool = False
+
+    def __post_init__(self) -> None:
+        if self.duration_seconds is not None and (
+            self.duration_seconds < 0 or not math.isfinite(self.duration_seconds)
+        ):
+            raise ValueError("audio duration must be non-negative and finite")
 
     @classmethod
     def unknown(cls) -> AudioUsage:

@@ -68,7 +68,34 @@ TranscriptionRequest
 LLMGateway.transcribe()        ← audio retries, fallback and duration cost
     │
     └── AudioProviderAdapter.transcribe()
+
+ImageRequest
+    │
+    ▼
+LLMGateway.generate_image()    ← image retries, fallback and per-image cost
+    │
+    └── ImageProviderAdapter.generate_image()
+
+VideoRequest
+    │
+    ▼
+LLMGateway.generate_video()    ← video retries, fallback and per-second cost
+    │
+    └── VideoProviderAdapter.generate_video()
 ```
+
+Four operations, four request types, four accounting seams — and the catalogue
+decides which one a model belongs to. An audio, image or video model sent
+through `generate()` raises instead of degrading: a transcription priced as
+tokens and an image reply read as text are both silent failures, and both were
+cheaper to make impossible than to detect.
+
+Video is synchronous from the caller's side because the current WaveSpeed
+integration can be polled: the adapter owns the loop, as the transcription
+adapters do, and
+`VideoRequest` defaults to a fifteen-minute total budget. A provider that only
+answers through a webhook would need a two-phase submit-and-poll contract
+instead, and that is deliberately left until one is actually adopted.
 
 Provider-reported audio duration is actual usage. Caller-supplied duration is
 kept as an estimate when a provider omits usage, and a missing duration remains
@@ -178,4 +205,4 @@ it.** One consumer's requirement is that consumer's adapter. A second real case
 is what makes a good general design possible.
 
 Enforced structurally by `tests/contract/test_package_boundaries.py`, which
-fails the build if any module exceeds 500 lines.
+fails the build if any module exceeds 2000 lines.

@@ -8,41 +8,30 @@ exactly the test for what belongs in this package.
 What stays out: **which model a feature should use**. That is a product
 decision, and putting it here would make one repository's choice everybody's.
 
-## Units
-
-Prices are declared in **USD per million tokens**, as every provider publishes
-them. Rates are consumed as **microUSD per token**. Those are the same number:
-
-    1 USD / 1,000,000 tokens = 1e-6 USD / token = 1 microUSD / token
-
-so the conversion is the identity, and there is no factor to get wrong. There
-is a test asserting exactly that.
-
-Models billed by audio duration use ``pricing_unit="audio_minutes"`` and keep
-their per-minute rate separately. They are routable through the catalogue but
-are intentionally excluded from the token price catalog.
-
-## Updating
-
-Change the price, bump ``CATALOG_VERSION``, tag a release. Consumers pin a tag,
-so nobody's cost figures move without an explicit upgrade — and every recorded
-amount carries the version that produced it, so old numbers stay reconcilable.
+Prices are declared in USD per million tokens; :mod:`llm_gateway.catalogs`
+turns this table into the price catalogues the gateways use.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Literal
 
 from llm_gateway.contracts import ReasoningEffort
-from llm_gateway.pricing import AudioRate, ModelRate, StaticAudioPriceCatalog, StaticPriceCatalog
+from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-08-04.5"
+CATALOG_VERSION = "2026-08-05.2"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
-PricingUnit = Literal["tokens", "audio_minutes"]
+PricingUnit = Literal["tokens", "audio_minutes", "images", "video_seconds"]
+Modality = Literal["text", "audio", "image", "video"]
+"""What a model does, which is not how it is billed: Gemini's image models are
+billed in tokens and still cannot answer a text call. Routing reads this,
+pricing reads ``pricing_unit``."""
 OPENAI_56_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "none",
     "low",
@@ -90,6 +79,19 @@ class ModelInfo:
     audio_usd_per_minute: Decimal | None = None
     """Audio rate for models billed by duration instead of tokens."""
     audio_minimum_seconds: int = 0
+    modality: Modality = "text"
+    image_usd_per_image: Decimal | None = None
+    """Per-image rate, or ``None`` where the provider publishes none — Replicate
+    bills community models by GPU time, so a fixed number would be a guess."""
+    image_output_usd_per_mtok: Decimal | None = None
+    """Image-output token rate when it differs from the model's text output rate."""
+    video_usd_per_second: Decimal | None = None
+    video_usd_per_second_by_resolution: Mapping[str, Decimal] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    """Per-second video rates. Resolution changes the rate on every video
+    provider seen so far, so the table is keyed by it when the provider
+    publishes more than one."""
 
     @property
     def rate(self) -> ModelRate:
@@ -110,6 +112,35 @@ class ModelInfo:
             minimum_billable_seconds=self.audio_minimum_seconds,
         )
 
+    @property
+    def video_rate(self) -> VideoRate | None:
+        """How a second of video is priced, or ``None`` when nothing prices it."""
+        if self.modality != "video":
+            raise ValueError(f"{self.id!r} does not generate video")
+        if self.video_usd_per_second is None and not self.video_usd_per_second_by_resolution:
+            return None
+        return VideoRate(
+            usd_per_second=self.video_usd_per_second,
+            usd_per_second_by_resolution=self.video_usd_per_second_by_resolution,
+        )
+
+    @property
+    def image_rate(self) -> ImageRate | None:
+        """How one generated image is priced, or ``None`` when nothing prices it."""
+        if self.modality != "image":
+            raise ValueError(f"{self.id!r} does not generate images")
+        if self.pricing_unit == "tokens":
+            output_rate = self.image_output_usd_per_mtok or self.output_usd_per_mtok
+            return ImageRate(
+                token_rate=ModelRate(
+                    input_microusd_per_token=self.input_usd_per_mtok,
+                    output_microusd_per_token=output_rate,
+                )
+            )
+        if self.image_usd_per_image is None:
+            return None
+        return ImageRate(usd_per_image=self.image_usd_per_image)
+
 
 def _m(
     model_id: str,
@@ -124,6 +155,11 @@ def _m(
     pricing_unit: PricingUnit = "tokens",
     audio_price_per_minute: str | None = None,
     audio_minimum_seconds: int = 0,
+    modality: Modality = "text",
+    image_price: str | None = None,
+    image_output_price_per_mtok: str | None = None,
+    video_price_per_second: str | None = None,
+    video_prices_by_resolution: dict[str, str] | None = None,
 ) -> ModelInfo:
     return ModelInfo(
         id=model_id,
@@ -139,6 +175,22 @@ def _m(
             Decimal(audio_price_per_minute) if audio_price_per_minute is not None else None
         ),
         audio_minimum_seconds=audio_minimum_seconds,
+        modality=modality,
+        image_usd_per_image=(Decimal(image_price) if image_price is not None else None),
+        image_output_usd_per_mtok=(
+            Decimal(image_output_price_per_mtok)
+            if image_output_price_per_mtok is not None
+            else None
+        ),
+        video_usd_per_second=(
+            Decimal(video_price_per_second) if video_price_per_second is not None else None
+        ),
+        video_usd_per_second_by_resolution=MappingProxyType(
+            {
+                resolution: Decimal(price)
+                for resolution, price in (video_prices_by_resolution or {}).items()
+            }
+        ),
     )
 
 
@@ -280,7 +332,14 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         deprecated=True,
         reasoning_efforts=GEMINI_3_PRO_REASONING_EFFORTS,
     ),
-    _m("gemini-3-pro-image", "gemini", "2.00", "12.00", deprecated=True),
+    _m(
+        "gemini-3-pro-image",
+        "gemini",
+        "2.00",
+        "12.00",
+        modality="image",
+        image_output_price_per_mtok="120.00",
+    ),
     _m(
         "gemini-3.1-flash-lite-preview",
         "gemini",
@@ -289,9 +348,31 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         notes="text/image/video share",
         reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
     ),
-    _m("gemini-3.1-flash-lite-image", "gemini", "0.25", "1.50"),
-    _m("gemini-3.1-flash-image", "gemini", "0.50", "3.00"),
-    _m("gemini-3.1-flash-image-preview", "gemini", "0.50", "3.00"),
+    _m(
+        "gemini-3.1-flash-lite-image",
+        "gemini",
+        "0.25",
+        "1.50",
+        modality="image",
+        image_output_price_per_mtok="30.00",
+    ),
+    _m(
+        "gemini-3.1-flash-image",
+        "gemini",
+        "0.50",
+        "3.00",
+        modality="image",
+        image_output_price_per_mtok="60.00",
+    ),
+    _m(
+        "gemini-3.1-flash-image-preview",
+        "gemini",
+        "0.50",
+        "3.00",
+        deprecated=True,
+        modality="image",
+        image_output_price_per_mtok="60.00",
+    ),
     _m(
         "gemini-3.1-pro-preview",
         "gemini",
@@ -348,7 +429,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("google/gemini-3-flash-preview", "openrouter", "0.50", "3.00", deprecated=True),
     _m("google/gemini-3-pro-preview", "openrouter", "2.00", "12.00", deprecated=True),
     _m("google/gemini-3.1-flash-lite-preview", "openrouter", "0.25", "1.50"),
-    _m("google/gemini-3.1-flash-image", "openrouter", "0.50", "3.00"),
+    _m("google/gemini-3.1-flash-image", "openrouter", "0.50", "3.00", modality="image"),
     _m("google/gemini-3.1-pro-preview", "openrouter", "2.00", "12.00"),
     _m("google/gemini-3.5-flash", "openrouter", "1.50", "9.00"),
     _m("google/gemini-3.5-flash-lite", "openrouter", "0.30", "2.50"),
@@ -397,6 +478,61 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("deepseek/deepseek-v4-pro", "openrouter", "0.435", "0.87"),
     _m("moonshotai/kimi-k2-thinking", "openrouter", "0.50", "1.50", deprecated=True),
     _m("moonshotai/kimi-k2.6", "openrouter", "0.74", "3.49", deprecated=True),
+    # ---- Replicate (image generation, billed per image or per GPU second) --
+    _m(
+        "black-forest-labs/flux-kontext-pro",
+        "replicate",
+        "0",
+        "0",
+        notes="image editing; USD 0.04 per output image",
+        supports_temperature=False,
+        pricing_unit="images",
+        modality="image",
+        image_price="0.04",
+    ),
+    _m(
+        "prunaai/p-image",
+        "replicate",
+        "0",
+        "0",
+        notes="community model billed by GPU time, so no per-image rate is published",
+        supports_temperature=False,
+        pricing_unit="images",
+        modality="image",
+    ),
+    _m(
+        "bytedance/seedream-4",
+        "replicate",
+        "0",
+        "0",
+        notes="no per-image rate verified; supply an ImagePriceCatalog to price it",
+        supports_temperature=False,
+        pricing_unit="images",
+        modality="image",
+    ),
+    # ---- WaveSpeed ------------------------------------------------------
+    _m(
+        "wavespeed-ai/minimax-h3/image-to-video",
+        "wavespeed",
+        "0",
+        "0",
+        notes="MiniMax H3 open weights; USD 0.04 per second at 480p, 0.08 at 768p",
+        supports_temperature=False,
+        pricing_unit="video_seconds",
+        modality="video",
+        video_prices_by_resolution={"480p": "0.04", "768p": "0.08"},
+    ),
+    _m(
+        "wavespeed-ai/hidream-i1-dev",
+        "wavespeed",
+        "0",
+        "0",
+        notes="image generation; USD 0.012 per image, rising with output size",
+        supports_temperature=False,
+        pricing_unit="images",
+        modality="image",
+        image_price="0.012",
+    ),
 )
 
 MODEL_CATALOG: dict[str, ModelInfo] = {entry.id: entry for entry in _ENTRIES}
@@ -447,47 +583,3 @@ def _is_non_three_gemini_model(model_id: str) -> bool:
         if major.isdigit() and major != "3":
             return True
     return False
-
-
-def builtin_price_catalog(
-    *,
-    overrides: dict[str, tuple[Decimal, Decimal]] | None = None,
-    version: str | None = None,
-) -> StaticPriceCatalog:
-    """The shared price table, optionally overridden by a consumer.
-
-    ``overrides`` maps a model id to ``(input, output)`` in USD per million
-    tokens — for negotiated rates, or for a model this catalogue does not know
-    yet. Supplying one without a ``version`` would make an amount
-    unreconcilable, so pass a version that identifies *your* table.
-    """
-    rates = {
-        model_id: info.rate
-        for model_id, info in MODEL_CATALOG.items()
-        if info.pricing_unit == "tokens"
-    }
-    resolved_version = version or CATALOG_VERSION
-
-    if overrides:
-        if version is None:
-            raise ValueError(
-                "overriding prices requires a version identifying your own table, "
-                f"so an amount is never attributed to {CATALOG_VERSION!r}"
-            )
-        for model_id, (input_price, output_price) in overrides.items():
-            rates[model_id] = ModelRate(
-                input_microusd_per_token=input_price,
-                output_microusd_per_token=output_price,
-            )
-
-    return StaticPriceCatalog(version=resolved_version, rates=rates)
-
-
-def builtin_audio_price_catalog(*, version: str | None = None) -> StaticAudioPriceCatalog:
-    """Build the duration-based catalogue, excluding every token model."""
-    rates = {
-        model_id: info.audio_rate
-        for model_id, info in MODEL_CATALOG.items()
-        if info.pricing_unit == "audio_minutes" and info.audio_usd_per_minute is not None
-    }
-    return StaticAudioPriceCatalog(version=version or CATALOG_VERSION, rates=rates)
