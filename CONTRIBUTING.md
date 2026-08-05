@@ -74,6 +74,21 @@ whichever keys you have:
 GROQ_API_KEY=... OPENROUTER_API_KEY=... uv run pytest -m live
 ```
 
+Image and video generation have their own live suite, and it is the more
+expensive one — a five-second 480p clip costs USD 0.20, so it is run
+deliberately and one file at a time:
+
+```bash
+uv sync --extra gemini --extra wavespeed
+GEMINI_API_KEY=... WAVESPEED_API_KEY=... \
+  uv run pytest -m live tests/live/test_media_live.py -q -s
+```
+
+It generates an image and then animates that exact image with a second
+provider, which is the only way to prove the chain an application actually
+runs. `LLM_GATEWAY_LIVE_MEDIA_DIR` decides where both land; the image test
+writes the frame the video test reads, so running only the second one skips.
+
 It exists because a fake client has one blind spot that has already cost money:
 it accepts any payload, so it cannot reject a request the way a provider does,
 and it cannot invent field names the way a model does. Groq's HTTP 400 for a
