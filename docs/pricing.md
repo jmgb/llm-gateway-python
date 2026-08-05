@@ -258,3 +258,14 @@ and recorded through `VideoUsageSink`.
 amount would be invented. Neither does a poll that finds the job still running
 — a job polled ten times is billed once. The poll that finds a terminal state
 is the one that prices what was produced and writes the usage record.
+
+That record carries the `request_id` and `source` of the original
+`VideoRequest`, because the job travels them itself. A video is billed minutes
+later from another process, and without the correlation inside the job there
+would be nothing left to reconcile the amount against — which would make video
+the one operation here whose spend could not be attributed.
+
+Replicate measures the clip it produced and returns it in the prediction's
+`metrics`, so `VideoUsage.seconds` is actual usage rather than the duration
+somebody requested, and `model_variant` gives back the tier that really ran.
+A prediction that reports no metrics leaves the length unknown — never zero.

@@ -10,6 +10,7 @@ job is its own contract: `submit_video()` hands back something storable, and
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import pytest
@@ -24,6 +25,7 @@ from llm_gateway import (
     LLMRequest,
     ProviderRegistry,
     ProviderResponse,
+    ProviderTimeoutError,
     ProviderVideoJobUpdate,
     ProviderVideoResponse,
     RateLimitedError,
@@ -389,3 +391,105 @@ class TestWebhooks:
         await _gateway(adapter).submit_video(_request(webhook_url="https://app.test/hooks/video"))
 
         assert adapter.submitted[0][0].webhook_url == "https://app.test/hooks/video"
+
+
+class TestTraceability:
+    """A cost nobody can attribute to a request is not reconcilable.
+
+    The whole point of the accounting is that an amount can be matched back to
+    the call that caused it. A video job is billed minutes later, from another
+    process, so unless the job carries the correlation itself there is nothing
+    left to match it with.
+    """
+
+    async def test_a_job_carries_the_request_it_came_from(self) -> None:
+        adapter = RecordingJobAdapter("replicate", _job())
+
+        job = await _gateway(adapter).submit_video(
+            _request(request_id="req-42", source="wildlife-clip")
+        )
+
+        assert job.request_id == "req-42"
+        assert job.source == "wildlife-clip"
+
+    async def test_the_terminal_record_names_the_original_request(self) -> None:
+        sink = VideoSink()
+        adapter = RecordingJobAdapter(
+            "replicate",
+            ProviderVideoJobUpdate(
+                status=VideoJobStatus.SUCCEEDED,
+                videos=(GeneratedVideo(url="https://cdn.test/lion.mp4"),),
+                usage=VideoUsage(seconds=5.0, videos=1),
+            ),
+        )
+
+        await _gateway(adapter, sink=sink).poll_video(
+            _job(request_id="req-42", source="wildlife-clip")
+        )
+
+        assert sink.records[0].request_id == "req-42"
+        assert sink.records[0].source == "wildlife-clip"
+
+    async def test_a_failed_job_is_attributable_too(self) -> None:
+        sink = VideoSink()
+        adapter = RecordingJobAdapter(
+            "replicate", ProviderVideoJobUpdate(status=VideoJobStatus.FAILED, error="boom")
+        )
+
+        await _gateway(adapter, sink=sink).poll_video(_job(request_id="req-42"))
+
+        assert sink.records[0].request_id == "req-42"
+
+    async def test_correlation_survives_a_round_trip_through_plain_data(self) -> None:
+        """It is only useful if it reaches the worker that polls."""
+        job = _job(request_id="req-42", source="wildlife-clip")
+
+        restored = VideoJob(
+            id=job.id,
+            model=job.model,
+            provider=job.provider,
+            status=job.status,
+            request_id=job.request_id,
+            source=job.source,
+        )
+
+        assert restored == job
+
+    async def test_a_job_without_correlation_is_still_valid(self) -> None:
+        """Not every caller tracks one, and demanding it would break the simple case."""
+        adapter = RecordingJobAdapter("replicate", _job())
+
+        job = await _gateway(adapter).submit_video(_request())
+
+        assert job.request_id is None
+        assert job.source is None
+
+
+class TestPollingIsBounded:
+    async def test_a_provider_that_never_answers_a_poll_does_not_hang_forever(self) -> None:
+        """A worker blocked on one status call stops draining its queue."""
+
+        class SilentAdapter:
+            name = "replicate"
+
+            async def submit_video(self, request: VideoRequest, *, model: str) -> VideoJob:
+                raise AssertionError("not used")
+
+            async def poll_video(self, job: VideoJob) -> ProviderVideoJobUpdate:
+                await asyncio.sleep(60)
+                raise AssertionError("should have timed out")
+
+            async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
+                raise AssertionError("not used")
+
+        with pytest.raises(ProviderTimeoutError):
+            await _gateway(SilentAdapter()).poll_video(_job(), timeout_seconds=0.01)
+
+    async def test_a_prompt_answer_is_unaffected_by_the_bound(self) -> None:
+        adapter = RecordingJobAdapter(
+            "replicate", ProviderVideoJobUpdate(status=VideoJobStatus.RUNNING)
+        )
+
+        result = await _gateway(adapter).poll_video(_job(), timeout_seconds=5.0)
+
+        assert result.job.status is VideoJobStatus.RUNNING

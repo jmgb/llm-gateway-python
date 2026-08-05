@@ -164,9 +164,13 @@ class LLMGateway:
         """
         return await self._videos.submit_video(request)
 
-    async def poll_video(self, job: VideoJob) -> VideoJobResult:
-        """Read a submitted job's state, and its clip once there is one."""
-        return await self._videos.poll_video(job)
+    async def poll_video(self, job: VideoJob, *, timeout_seconds: float = 30.0) -> VideoJobResult:
+        """Read a submitted job's state, and its clip once there is one.
+
+        ``timeout_seconds`` bounds the status call, not the job — which is
+        expected to run for minutes and is why this is a poll at all.
+        """
+        return await self._videos.poll_video(job, timeout_seconds=timeout_seconds)
 
     async def generate(self, request: LLMRequest) -> LLMResult:
         """Run the request to completion, or raise a typed error.

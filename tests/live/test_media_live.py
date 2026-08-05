@@ -192,6 +192,7 @@ KLING_MODEL = "kwaivgi/kling-v3-video"
 KLING_RESOLUTION = "720p"  # Kling's cheapest tier; sent as mode="standard", not "pro"
 _KLING_POLL_SECONDS = 10.0
 _KLING_MAX_WAIT_SECONDS = 900.0
+_REQUEST_ID = "live-kling-lion"
 
 
 @asynccontextmanager
@@ -249,6 +250,7 @@ async def _run_kling_job(gateway: LLMGateway, frame: Path) -> None:
             resolution=KLING_RESOLUTION,
             duration_seconds=VIDEO_SECONDS,
             source="live-media-integration",
+            request_id=_REQUEST_ID,
             timeout_policy=TimeoutPolicy(total_seconds=300.0),
         )
     )
@@ -270,13 +272,18 @@ async def _run_kling_job(gateway: LLMGateway, frame: Path) -> None:
 
     assert result.job.status is VideoJobStatus.SUCCEEDED, f"kling failed: {result.error}"
     assert result.job.id == job.id, "the job id must survive the round trip"
+    assert result.job.request_id == _REQUEST_ID, "the cost must stay attributable"
     video = result.videos[0]
     assert video.url, "Replicate returned no video URL"
-    # Replicate bills Wan and Kling by GPU time and reports no clip length, so
-    # this stays honest about not knowing rather than reporting a free clip.
-    assert result.usage.seconds is None
+    # Replicate measures the clip it produced and reports it in `metrics`, so
+    # the length is real usage rather than the duration someone asked for.
+    assert result.usage.seconds == float(VIDEO_SECONDS)
+    assert result.usage.resolution == KLING_RESOLUTION, "the tier that actually ran"
+    # No per-second rate for Kling could be verified, so the amount is still
+    # unknown — but the usage it would be computed from is now there.
     assert result.cost.measurement is CostMeasurement.UNAVAILABLE
     print(
         f"kling video: model={result.job.model} status={result.job.status.value} "
+        f"seconds={result.usage.seconds} resolution={result.usage.resolution} "
         f"cost={result.cost.measurement.value} url={video.url}"
     )

@@ -224,16 +224,60 @@ class ReplicateAdapter:
             )
 
         videos = _videos(getattr(prediction, "output", None))
+        metrics = getattr(prediction, "metrics", None) or {}
         return ProviderVideoJobUpdate(
             status=status,
             videos=videos,
-            # Replicate bills GPU time and reports no clip length, so seconds
-            # stay unknown. Zero would price a real invoice at nothing.
-            usage=VideoUsage(videos=len(videos)),
+            usage=VideoUsage(
+                # Measured by Replicate on the clip it just produced, so this
+                # is actual usage rather than the duration someone requested.
+                # Absent it stays unknown — never zero, which would price a
+                # real invoice at nothing.
+                seconds=_measured_seconds(metrics),
+                videos=len(videos),
+                resolution=_measured_resolution(metrics, job.model),
+            ),
         )
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         raise ConfigurationError("Replicate is registered for media generation only")
+
+
+def _measured_seconds(metrics: Any) -> float | None:
+    """The clip length Replicate measured, or ``None`` when it reported none.
+
+    Anything unusable — missing, negative, not a number — is unknown rather
+    than coerced, because a wrong length prices a real invoice wrongly and a
+    missing one only leaves it unpriced.
+    """
+    if not isinstance(metrics, dict):
+        return None
+    try:
+        seconds = float(metrics.get("video_output_duration_seconds"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _measured_resolution(metrics: Any, model: str) -> str | None:
+    """The tier that actually ran, back in the package's own spelling.
+
+    Kling reports ``model_variant`` — its own name for the tier, the same one
+    the request sent as ``mode``. Translating it back is what lets a
+    resolution-keyed price table find the rate that was really charged. A
+    variant the model does not declare stays unknown rather than being mapped
+    to the nearest guess.
+    """
+    if not isinstance(metrics, dict):
+        return None
+    variant = metrics.get("model_variant")
+    shape = _VIDEO_SHAPES.get(model)
+    if not isinstance(variant, str) or shape is None or shape.resolutions is None:
+        return None
+    for neutral, provider_name in shape.resolutions.items():
+        if provider_name == variant:
+            return neutral
+    return None
 
 
 def _frame_reference(image: ImageInput) -> str:

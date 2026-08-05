@@ -646,8 +646,12 @@ class TestReplicateVideoPolling:
                 VideoJob(id="pred-1", model=WAN, provider="replicate")
             )
 
-    async def test_replicate_never_claims_a_clip_length_it_does_not_report(self) -> None:
-        """Wan is billed by GPU time and reports no duration; zero would be a lie."""
+    async def test_a_prediction_that_reports_no_metrics_claims_no_length(self) -> None:
+        """Unknown, not zero — zero would price a real invoice at nothing.
+
+        Replicate does report the length when it sends metrics; see
+        `TestReplicateReportsWhatItActuallyMeasures`. This is the other case.
+        """
         client = _client(_prediction("succeeded", output="https://x/y.mp4"))
 
         update = await ReplicateAdapter(client).poll_video(
@@ -888,3 +892,80 @@ class TestTheDefaultResolutionIsTheCheapestEachModelOffers:
 
         assert client.posted[0][1]["resolution"] == "768p"
         assert response.usage.resolution == "768p"
+
+
+class TestReplicateReportsWhatItActuallyMeasures:
+    """A prediction carries metrics, and discarding them invents an unknown.
+
+    Replicate answers a finished video prediction with, among others,
+    `video_output_duration_seconds` — the length of the clip it just produced —
+    and `model_variant`, the tier that produced it. Reporting `None` for either
+    while the provider is handing it over is the same failure as reporting zero,
+    only quieter: the amount comes back UNAVAILABLE and nobody can price a clip
+    the provider already measured.
+    """
+
+    @staticmethod
+    def _finished(**metrics: Any) -> SimpleNamespace:
+        return _prediction("succeeded", output="https://x/y.mp4", metrics=metrics)
+
+    async def test_the_measured_clip_length_becomes_usage_seconds(self) -> None:
+        client = _client(self._finished(video_output_duration_seconds=5, predict_time=130.2))
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=WAN, provider="replicate")
+        )
+
+        assert update.usage.seconds == 5.0
+        assert update.usage.videos == 1
+
+    async def test_a_measured_length_is_actual_not_an_estimate(self) -> None:
+        """The provider measured the clip it produced, so cost may say ACTUAL."""
+        client = _client(self._finished(video_output_duration_seconds=5))
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=WAN, provider="replicate")
+        )
+
+        assert update.usage.complete is True
+
+    async def test_kling_reports_the_tier_that_actually_ran(self) -> None:
+        """`model_variant` is Kling's own spelling; usage speaks the neutral one."""
+        client = _client(self._finished(video_output_duration_seconds=5, model_variant="standard"))
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=KLING, provider="replicate")
+        )
+
+        assert update.usage.resolution == "720p"
+
+    async def test_a_variant_the_model_does_not_declare_is_not_guessed(self) -> None:
+        client = _client(self._finished(video_output_duration_seconds=5, model_variant="turbo"))
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=KLING, provider="replicate")
+        )
+
+        assert update.usage.resolution is None
+        assert update.usage.seconds == 5.0
+
+    async def test_a_prediction_without_metrics_still_reports_the_video(self) -> None:
+        """Missing metrics means unknown, which is not the same as broken."""
+        client = _client(_prediction("succeeded", output="https://x/y.mp4"))
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=WAN, provider="replicate")
+        )
+
+        assert update.usage.seconds is None
+        assert update.usage.videos == 1
+
+    @pytest.mark.parametrize("bad", ["", None, -1, "five"])
+    async def test_an_unusable_duration_is_unknown_rather_than_wrong(self, bad: Any) -> None:
+        client = _client(self._finished(video_output_duration_seconds=bad))
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=WAN, provider="replicate")
+        )
+
+        assert update.usage.seconds is None

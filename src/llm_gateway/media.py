@@ -318,6 +318,15 @@ class VideoJob:
     model: str
     provider: str
     status: VideoJobStatus = VideoJobStatus.QUEUED
+    request_id: str | None = None
+    source: str | None = None
+    """Carried from the ``VideoRequest`` so the eventual cost stays attributable.
+
+    A job is billed minutes later, from another process, and by then the
+    request is long gone. Without the correlation travelling inside the job
+    there is nothing left to match the amount against — which would make video
+    the one operation here whose spend cannot be reconciled.
+    """
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -328,7 +337,14 @@ class VideoJob:
             raise ValueError("a video job records the provider that holds it")
 
     def with_status(self, status: VideoJobStatus) -> VideoJob:
-        return VideoJob(id=self.id, model=self.model, provider=self.provider, status=status)
+        return VideoJob(
+            id=self.id,
+            model=self.model,
+            provider=self.provider,
+            status=status,
+            request_id=self.request_id,
+            source=self.source,
+        )
 
 
 @dataclass(frozen=True, slots=True)

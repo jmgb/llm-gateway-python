@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 
 from llm_gateway.catalogs import builtin_image_price_catalog, builtin_video_price_catalog
 from llm_gateway.contracts import AttemptOutcome, FailurePhase
@@ -405,6 +406,9 @@ class VideoGateway:
         for model in plan:
             outcome = await self._attempt_submission(request, model=model, attempts=attempts)
             if isinstance(outcome, VideoJob):
+                # Stamped here rather than in each adapter, so no provider can
+                # forget it and leave its clip's cost unattributable.
+                outcome = replace(outcome, request_id=request.request_id, source=request.source)
                 if outcome.model != request.model:
                     self._alerts.alert(
                         "llm_video_fallback_used",
@@ -491,19 +495,30 @@ class VideoGateway:
         assert last_failure is not None
         return last_failure
 
-    async def poll_video(self, job: VideoJob) -> VideoJobResult:
+    async def poll_video(self, job: VideoJob, *, timeout_seconds: float = 30.0) -> VideoJobResult:
         """Read a job's state, and its clip once the provider has one.
 
         Raises only when the *reading* failed. A job the provider gave up on
         is a status, not an exception: the submission worked, and an
         application storing the outcome needs the reason, not a traceback.
+
+        ``timeout_seconds`` bounds this one status call, not the job, which may
+        legitimately run for minutes. Its own budget because a poll takes no
+        ``VideoRequest``, and an unbounded one blocks the worker that made it
+        on a provider that stopped answering.
         """
         adapter = self._registry.by_name(job.provider)
         _require_job_provider(adapter)
         assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
 
         started = time.perf_counter()
-        update = await adapter.poll_video(job)
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                update = await adapter.poll_video(job)
+        except TimeoutError as error:
+            raise ProviderTimeoutError(
+                f"polling video job {job.id} exceeded {timeout_seconds}s"
+            ) from error
         polled = job.with_status(update.status)
 
         if not update.status.is_terminal:
@@ -552,8 +567,8 @@ class VideoGateway:
                 execution,
                 usage=usage,
                 cost=cost,
-                request_id=None,
-                source=None,
+                request_id=job.request_id,
+                source=job.source,
                 succeeded=succeeded,
             )
         )

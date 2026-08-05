@@ -338,22 +338,37 @@ job.id, job.model, job.provider, job.status  # four strings: store them
 ```
 
 `VideoJob` is plain data on purpose — the process that polls is usually not the
-one that submitted. Save those four fields, rebuild it later, and read it back
-from anywhere:
+one that submitted. Save its fields, rebuild it later, and read it back from
+anywhere:
 
 ```python
-result = await gateway.poll_video(VideoJob(id=row.id, model=row.model, provider=row.provider))
+result = await gateway.poll_video(
+    VideoJob(
+        id=row.id,
+        model=row.model,
+        provider=row.provider,
+        request_id=row.request_id,  # so the eventual cost stays attributable
+    ),
+    timeout_seconds=30.0,  # bounds the status call, not the job
+)
 
 if result.job.status is VideoJobStatus.SUCCEEDED:
     result.videos[0].url
+    result.usage.seconds  # measured by the provider, where it reports one
     result.cost.amount_usd
 elif result.job.status is VideoJobStatus.FAILED:
     result.error  # why the provider gave up, when it says
 ```
 
+`request_id` and `source` are copied from the `VideoRequest` into the job, so
+store them alongside the rest: the clip is billed minutes later from another
+process, and they are what ties that amount back to the call that caused it.
+
 A job the provider gave up on is a status, not an exception: the submission
 worked, and an application storing the outcome wants the reason rather than a
-traceback. `poll_video()` raises only when the *reading* failed.
+traceback. `poll_video()` raises only when the *reading* failed — including
+when the status call itself exceeds `timeout_seconds`, which stops a stalled
+provider from blocking the worker that polled it.
 
 Nothing is billed until the job is terminal. A submission records no usage —
 the clip does not exist yet — and a job polled ten times is recorded once.

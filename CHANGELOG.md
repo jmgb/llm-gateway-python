@@ -9,6 +9,29 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Replicate reports the length of the clip it produced, and 0.11.0 discarded
+  it.** A finished prediction carries `metrics.video_output_duration_seconds`,
+  measured on the video that was generated, plus `model_variant` — the tier
+  that actually ran. The adapter now reads both, so `VideoUsage.seconds` is
+  real usage rather than `None` and `VideoUsage.resolution` comes back in the
+  package's own spelling. Anyone supplying a `VideoPriceCatalog` gets a
+  computed amount where the answer used to be `UNAVAILABLE`. A prediction that
+  reports no metrics still leaves the length unknown, never zero.
+- **A video job's cost is attributable again.** `VideoJob` gained `request_id`
+  and `source`, copied from the `VideoRequest` at submission, and the terminal
+  poll now records them. Previously both reached the usage sink as `None`, so
+  the one operation billed minutes later from another process was also the one
+  whose spend could not be reconciled with the call that caused it. Stamped by
+  the gateway rather than by each adapter, so no provider can omit it.
+- **`poll_video()` is bounded.** It takes a `timeout_seconds` (default `30.0`)
+  and raises `ProviderTimeoutError` when the status call exceeds it. It had no
+  budget at all — a poll takes no `VideoRequest` and so inherited no
+  `TimeoutPolicy` — which let a provider that stopped answering block the
+  worker that polled it indefinitely. The bound is on the status call, never on
+  the job, which is expected to run for minutes.
+
 ## [0.11.0] — 2026-08-06
 
 ### Added
