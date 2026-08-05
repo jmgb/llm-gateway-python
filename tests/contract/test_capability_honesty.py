@@ -36,6 +36,7 @@ REQUEST_FIELD_FOR_CAPABILITY = {
     "image_editing": "image",
     "video_generation": "prompt",
     "video_from_image": "image",
+    "video_webhooks": "webhook_url",
     "structured_outputs": "response_schema",
     "json_mode": "response_format",
     "reasoning_effort": "reasoning_effort",

@@ -37,6 +37,11 @@ CAPABILITIES = ProviderCapabilities(
     reports_token_usage=False,
 )
 
+# The cheapest tier each video model offers, used when the caller states none.
+# A model absent here is one whose tiers nobody read from WaveSpeed's docs, and
+# it is left to the provider's own default rather than given an invented floor.
+_LOWEST_RESOLUTION = {"wavespeed-ai/minimax-h3/image-to-video": "480p"}
+
 
 class WaveSpeedHttpClient:
     """Small injected REST client; it owns the key, never the gateway."""
@@ -130,8 +135,13 @@ class WaveSpeedAdapter:
         payload: dict[str, Any] = {"prompt": request.prompt}
         if request.image is not None:
             payload["image"] = _image_reference(request.image)
-        if request.resolution is not None:
-            payload["resolution"] = request.resolution
+        # An unstated resolution is the model's cheapest tier. Sending nothing
+        # would let WaveSpeed pick, and 768p on MiniMax H3 costs twice 480p —
+        # a bill the caller never asked for, and one the usage below could not
+        # even price, since the resolution would come back unknown.
+        resolution = request.resolution or _LOWEST_RESOLUTION.get(model)
+        if resolution is not None:
+            payload["resolution"] = resolution
         if request.duration_seconds is not None:
             payload["duration"] = request.duration_seconds
 
@@ -158,7 +168,7 @@ class WaveSpeedAdapter:
             usage=VideoUsage(
                 seconds=float(request.duration_seconds) if request.duration_seconds else None,
                 videos=len(videos),
-                resolution=request.resolution,
+                resolution=resolution,
                 # WaveSpeed reports no clip length, and it snaps the output to
                 # the model's frame grid, so the requested duration is an
                 # estimate rather than a measurement. Cost degrades to

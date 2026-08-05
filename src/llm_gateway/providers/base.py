@@ -15,7 +15,9 @@ from llm_gateway.contracts import LLMRequest
 from llm_gateway.media import (
     ImageRequest,
     ProviderImageResponse,
+    ProviderVideoJobUpdate,
     ProviderVideoResponse,
+    VideoJob,
     VideoRequest,
 )
 from llm_gateway.tools import ProviderToolCall
@@ -65,6 +67,27 @@ class VideoProviderAdapter(Protocol):
 
     async def generate_video(self, request: VideoRequest, *, model: str) -> ProviderVideoResponse:
         """Perform exactly one video call. Raise a typed error; never return one."""
+        ...
+
+
+@runtime_checkable
+class VideoJobProviderAdapter(Protocol):
+    """Provider adapter whose video finishes long after the call returns.
+
+    Separate from ``VideoProviderAdapter`` rather than optional methods on it,
+    because the difference is visible to the caller: one shape is awaited, the
+    other is stored and polled. ``isinstance`` against the wrong one is what
+    turns "this provider cannot do that" into an error instead of a hang.
+    """
+
+    name: str
+
+    async def submit_video(self, request: VideoRequest, *, model: str) -> VideoJob:
+        """Create exactly one job. Raise a typed error; never return one."""
+        ...
+
+    async def poll_video(self, job: VideoJob) -> ProviderVideoJobUpdate:
+        """Read one job's state. Raise only when the *reading* failed."""
         ...
 
 

@@ -28,6 +28,10 @@ class ProviderCapabilities:
     video_from_image: bool = False
     """The same split for video: a text-to-video model cannot animate a first
     frame it was not built to accept."""
+    video_webhooks: bool = False
+    """Whether a submitted job can announce its own completion. A provider
+    without it has to be polled, which is a different amount of work for the
+    application and so is worth asking about before it commits to a design."""
     reasoning_effort: bool = False
     verbosity: bool = False
     upstream_routing: bool = False

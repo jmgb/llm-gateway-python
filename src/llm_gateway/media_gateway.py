@@ -35,6 +35,9 @@ from llm_gateway.media import (
     ProviderVideoResponse,
     VideoAttempt,
     VideoExecution,
+    VideoJob,
+    VideoJobResult,
+    VideoJobStatus,
     VideoRequest,
     VideoResult,
 )
@@ -52,7 +55,11 @@ from llm_gateway.ports import (
     video_execution_to_record,
 )
 from llm_gateway.pricing import ImageCost, ImagePriceCatalog, VideoCost, VideoPriceCatalog
-from llm_gateway.providers.base import ImageProviderAdapter, VideoProviderAdapter
+from llm_gateway.providers.base import (
+    ImageProviderAdapter,
+    VideoJobProviderAdapter,
+    VideoProviderAdapter,
+)
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import ImageUsage, VideoUsage
 
@@ -379,6 +386,199 @@ class VideoGateway:
                 attempts=tuple(attempts),
             ) from None
 
+    async def submit_video(self, request: VideoRequest) -> VideoJob:
+        """Create a job on a provider that finishes long after this returns.
+
+        Only the submission is bounded by the timeout policy. The clip takes
+        minutes, so waiting for it here is what this method exists to avoid.
+        """
+        attempts: list[VideoAttempt] = []
+        started = time.perf_counter()
+        # Resolved up front, so a provider that cannot take a job at all says
+        # so before the first request rather than after the last retry.
+        plan = [request.model, *request.fallback_policy.models]
+        for model in plan:
+            _require_job_provider(self._registry.resolve(model))
+            _require_video_model(model)
+
+        last_failure: LLMGatewayError | None = None
+        for model in plan:
+            outcome = await self._attempt_submission(request, model=model, attempts=attempts)
+            if isinstance(outcome, VideoJob):
+                if outcome.model != request.model:
+                    self._alerts.alert(
+                        "llm_video_fallback_used",
+                        {
+                            "requested_model": request.model,
+                            "model_used": outcome.model,
+                            "request_id": request.request_id,
+                        },
+                    )
+                self._events.emit(
+                    "llm_video_job_submitted",
+                    {
+                        "request_id": request.request_id,
+                        "source": request.source,
+                        "provider": outcome.provider,
+                        "requested_model": request.model,
+                        "model_used": outcome.model,
+                        "attempts": len(attempts),
+                        "status": outcome.status.value,
+                    },
+                )
+                # Nothing is recorded yet on purpose: the clip does not exist,
+                # so any amount here would be invented. The terminal poll bills.
+                return outcome
+            last_failure = outcome
+
+        self._report_failure(request, attempts, started=started)
+        raise AllVideosFailed(
+            f"all {len(attempts)} video submission(s) failed for model {request.model!r}",
+            attempts=tuple(attempts),
+        ) from last_failure
+
+    async def _attempt_submission(
+        self,
+        request: VideoRequest,
+        *,
+        model: str,
+        attempts: list[VideoAttempt],
+    ) -> VideoJob | LLMGatewayError:
+        adapter = self._registry.resolve(model)
+        policy = request.retry_policy
+        last_failure: LLMGatewayError | None = None
+
+        for attempt_number in range(1, policy.max_attempts + 1):
+            attempt_started = time.perf_counter()
+            try:
+                _require_job_provider(adapter)
+                assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
+                async with asyncio.timeout(request.timeout_policy.per_attempt_seconds):
+                    job = await adapter.submit_video(request, model=model)
+            except TimeoutError as error:
+                failure: LLMGatewayError = ProviderTimeoutError(
+                    f"video submission exceeded {request.timeout_policy.per_attempt_seconds}s"
+                )
+                failure.__cause__ = error
+            except LLMGatewayError as error:
+                failure = error
+            else:
+                return job
+
+            last_failure = failure
+            attempts.append(
+                _record_video_attempt(
+                    index=len(attempts) + 1,
+                    model=model,
+                    provider=adapter.name,
+                    outcome="failed",
+                    usage=VideoUsage.unknown(),
+                    cost=VideoCost.unavailable(pricing_version=self._prices.version),
+                    started=attempt_started,
+                    error_type=type(failure).__name__,
+                    # A submission that never produced a job produced no clip,
+                    # so unlike a generation attempt it was not billed.
+                    billable=False,
+                    failure_phase=_phase_of(failure),
+                )
+            )
+            if not policy.should_retry(failure, attempt_number=attempt_number):
+                return failure
+            delay = policy.delay_before(attempt_number=attempt_number)
+            if delay:
+                await asyncio.sleep(delay)
+
+        assert last_failure is not None
+        return last_failure
+
+    async def poll_video(self, job: VideoJob) -> VideoJobResult:
+        """Read a job's state, and its clip once the provider has one.
+
+        Raises only when the *reading* failed. A job the provider gave up on
+        is a status, not an exception: the submission worked, and an
+        application storing the outcome needs the reason, not a traceback.
+        """
+        adapter = self._registry.by_name(job.provider)
+        _require_job_provider(adapter)
+        assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
+
+        started = time.perf_counter()
+        update = await adapter.poll_video(job)
+        polled = job.with_status(update.status)
+
+        if not update.status.is_terminal:
+            return VideoJobResult(
+                job=polled,
+                cost=VideoCost.unavailable(pricing_version=self._prices.version),
+                error=update.error,
+            )
+
+        if update.status is VideoJobStatus.SUCCEEDED and not update.videos:
+            # A success carrying nothing would be stored as a finished, empty
+            # clip and never retried. The provider was still paid for it.
+            raise AllVideosFailed(
+                f"{job.provider} reported job {job.id} as succeeded with no video",
+                attempts=(),
+            )
+
+        succeeded = update.status is VideoJobStatus.SUCCEEDED
+        usage = update.usage if succeeded else VideoUsage.unknown()
+        cost = (
+            self._prices.estimate(job.model, usage)
+            if succeeded
+            else VideoCost.unavailable(pricing_version=self._prices.version)
+        )
+        execution = VideoExecution(
+            requested_model=job.model,
+            model_used=job.model,
+            provider=job.provider,
+            attempts=(
+                _record_video_attempt(
+                    index=1,
+                    model=job.model,
+                    provider=job.provider,
+                    outcome="succeeded" if succeeded else "failed",
+                    usage=usage,
+                    cost=cost,
+                    started=started,
+                    error_type=None if succeeded else "VideoJobFailed",
+                    failure_phase=None if succeeded else FailurePhase.PROVIDER,
+                ),
+            ),
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+        self._usage_sink.record(
+            video_execution_to_record(
+                execution,
+                usage=usage,
+                cost=cost,
+                request_id=None,
+                source=None,
+                succeeded=succeeded,
+            )
+        )
+        self._events.emit(
+            "llm_video_job_succeeded" if succeeded else "llm_video_job_failed",
+            {
+                "provider": job.provider,
+                "requested_model": job.model,
+                "model_used": job.model,
+                "status": update.status.value,
+                "video_seconds": usage.seconds,
+                "resolution": usage.resolution,
+                "cost_microusd": cost.microusd,
+                "cost_measurement": cost.measurement.value,
+                "pricing_version": cost.pricing_version,
+            },
+        )
+        return VideoJobResult(
+            job=polled,
+            videos=update.videos,
+            usage=usage,
+            cost=cost,
+            error=update.error,
+        )
+
     async def _run(self, request: VideoRequest, attempts: list[VideoAttempt]) -> VideoResult:
         started = time.perf_counter()
         plan = [request.model, *request.fallback_policy.models]
@@ -553,6 +753,21 @@ class VideoGateway:
                 source=request.source,
                 succeeded=succeeded,
             )
+        )
+
+
+def _require_job_provider(adapter: object) -> None:
+    """Refuse a provider whose video is awaited rather than submitted.
+
+    The two shapes are not interchangeable, and the wrong one is worth an
+    error: a caller that stored a job id from a provider which never issues
+    one would poll something that does not exist.
+    """
+    if not isinstance(adapter, VideoJobProviderAdapter):
+        name = getattr(adapter, "name", "unknown")
+        raise ConfigurationError(
+            f"provider {name} cannot submit or poll a video job; "
+            f"use LLMGateway.generate_video() instead"
         )
 
 

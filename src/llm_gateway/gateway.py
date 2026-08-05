@@ -47,7 +47,14 @@ from llm_gateway.errors import (
     SchemaValidationError,
 )
 from llm_gateway.json_payload import parse_json_payload
-from llm_gateway.media import ImageRequest, ImageResult, VideoRequest, VideoResult
+from llm_gateway.media import (
+    ImageRequest,
+    ImageResult,
+    VideoJob,
+    VideoJobResult,
+    VideoRequest,
+    VideoResult,
+)
 from llm_gateway.media_gateway import ImageGateway, VideoGateway
 from llm_gateway.models import ModelInfo, lookup_model
 from llm_gateway.ports import (
@@ -141,8 +148,25 @@ class LLMGateway:
         return await self._images.generate_image(request)
 
     async def generate_video(self, request: VideoRequest) -> VideoResult:
-        """Generate video, with per-second accounting separate from tokens."""
+        """Generate video, with per-second accounting separate from tokens.
+
+        For providers whose adapter can own the polling loop. One awaited call
+        that returns the clip; ``submit_video()`` serves the rest.
+        """
         return await self._videos.generate_video(request)
+
+    async def submit_video(self, request: VideoRequest) -> VideoJob:
+        """Start a video job and return it, minutes before the clip exists.
+
+        The returned job is plain storable data. Poll it with ``poll_video()``
+        from wherever is convenient — a worker, or the handler for the webhook
+        registered through ``VideoRequest.webhook_url``.
+        """
+        return await self._videos.submit_video(request)
+
+    async def poll_video(self, job: VideoJob) -> VideoJobResult:
+        """Read a submitted job's state, and its clip once there is one."""
+        return await self._videos.poll_video(job)
 
     async def generate(self, request: LLMRequest) -> LLMResult:
         """Run the request to completion, or raise a typed error.

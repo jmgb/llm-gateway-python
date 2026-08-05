@@ -80,10 +80,20 @@ LLMGateway.generate_image()    ← image retries, fallback and per-image cost
 
 VideoRequest
     │
-    ▼
-LLMGateway.generate_video()    ← video retries, fallback and per-second cost
+    ├─▶ LLMGateway.generate_video()   ← awaited: video retries, fallback, cost
+    │       │
+    │       └── VideoProviderAdapter.generate_video()
     │
-    └── VideoProviderAdapter.generate_video()
+    └─▶ LLMGateway.submit_video()     ← returns a VideoJob, minutes early
+            │
+            └── VideoJobProviderAdapter.submit_video()
+
+VideoJob
+    │
+    ▼
+LLMGateway.poll_video()        ← status now, clip and cost when terminal
+    │
+    └── VideoJobProviderAdapter.poll_video()
 ```
 
 Four operations, four request types, four accounting seams — and the catalogue
@@ -92,12 +102,55 @@ through `generate()` raises instead of degrading: a transcription priced as
 tokens and an image reply read as text are both silent failures, and both were
 cheaper to make impossible than to detect.
 
-Video is synchronous from the caller's side because the current WaveSpeed
-integration can be polled: the adapter owns the loop, as the transcription
-adapters do, and
-`VideoRequest` defaults to a fifteen-minute total budget. A provider that only
-answers through a webhook would need a two-phase submit-and-poll contract
-instead, and that is deliberately left until one is actually adopted.
+### Why video has two shapes and the others have one
+
+Because the providers do. WaveSpeed can be polled from inside the adapter, so
+`generate_video()` is one awaited call and `VideoRequest` defaults to a
+fifteen-minute total budget. Replicate answers `predictions.create` with an id
+and finishes minutes later, and the applications that use it do not sit and
+wait: they store the id, then either poll it from a worker or let Replicate's
+webhook wake them. Wrapping that in one `await` would put a four-minute
+timeout inside `TimeoutPolicy` and make the webhook impossible.
+
+So `VideoJob` is deliberately four fields of plain data — id, model, provider,
+status. The process that polls is usually not the one that submitted, and
+everything it needs has to survive a database row. It carries the model and
+provider that *hold* the job rather than the ones requested, because after a
+fallback those differ, and polling the requested one asks the wrong provider
+for an id it never issued.
+
+The split is expressed as two adapter protocols rather than optional methods
+on one, so `isinstance` turns "this provider does not work that way" into an
+error at the seam instead of a request that hangs.
+
+Accounting follows the clip, not the call: a submission records nothing,
+because no video exists yet and any amount would be invented. Intermediate
+polls record nothing either — a job polled ten times is billed once. Only the
+poll that finds a terminal state writes to the usage sink.
+
+### An option left unset must not be the expensive one
+
+Video resolution is where this bites hardest, so it is the rule the adapters
+follow: an unstated `VideoRequest.resolution` becomes the **cheapest tier the
+model offers**, never the provider's own default. Every video provider
+integrated so far defaults to something dearer than its floor — 720p for Wan
+and Seedance, `pro` (1080p) for Kling — which makes the request that says
+nothing the one that quietly costs the most.
+
+This is not the package choosing a product policy. It is the same principle as
+the rest of the accounting: the caller who did not express a preference has not
+authorised the expensive answer, and a default that spends more than asked is
+the silent kind of failure the package exists to prevent. Stating a resolution
+still wins, and one the model does not offer raises instead of degrading.
+
+It has a second effect worth naming: resolution decides the rate, so an adapter
+that sent none would get back a clip whose resolution it could not report, and
+`VideoUsage.resolution` of `None` prices at `UNAVAILABLE`. Pinning the floor is
+what keeps the amount computable at all.
+
+The limit is honesty about what was verified: a model whose tiers were never
+read from a published schema gets no default, because an invented floor is a
+guess and a rejected request.
 
 Provider-reported audio duration is actual usage. Caller-supplied duration is
 kept as an estimate when a provider omits usage, and a missing duration remains

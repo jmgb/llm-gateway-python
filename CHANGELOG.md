@@ -57,6 +57,49 @@ consumer pins an immutable tag and upgrades through its own pull request.
   image), `wavespeed-ai/hidream-i1-dev` (USD 0.012 per image), `prunaai/p-image` and
   `bytedance/seedream-4` (no published per-image rate, so their cost reports
   `UNAVAILABLE` rather than zero), plus a `modality` field on `ModelInfo`.
+- **Video jobs**, for providers whose clip arrives minutes after the call:
+  `LLMGateway.submit_video()` returns a `VideoJob`, `LLMGateway.poll_video()`
+  reads it back, and `VideoJobStatus`, `VideoJobResult`,
+  `ProviderVideoJobUpdate` and `VideoJobProviderAdapter` complete the contract.
+  The Replicate adapter implements it for `wan-video/wan-2.2-5b-fast`, both
+  text-to-video and image-to-video, over `predictions.create`/`predictions.get`.
+
+  Two applications were already writing this twice: create a prediction, keep
+  the id, then either poll it from a worker or wait for the webhook. Awaiting
+  it instead would put a four-minute timeout inside `TimeoutPolicy` and leave
+  no way to use the webhook at all, so `generate_video()` stays for providers
+  the adapter can poll from the inside and this is the second route.
+
+  `VideoJob` is four fields of plain data — id, model, provider, status —
+  because the process that polls is rarely the one that submitted, and what it
+  needs has to survive a database row. It records the model and provider that
+  *hold* the job, which after a fallback are not the ones requested.
+
+  Nothing is billed until the job is terminal: a submission has produced no
+  clip, and a job polled ten times is recorded once. A job the provider gave up
+  on is a status carrying its reason, not an exception; `poll_video()` raises
+  only when the reading itself failed.
+- **`VideoRequest.webhook_url`**, registering where a job-shaped provider should
+  announce that it finished, and `ProviderCapabilities.video_webhooks` for
+  asking first. Receiving the callback and verifying its signature stay with
+  the application; an adapter whose provider has no webhook refuses the field
+  rather than dropping it, since a caller who believes it registered one waits
+  forever.
+- Catalogue entries for the Replicate video models `wan-video/wan-2.2-5b-fast`,
+  `kwaivgi/kling-v3-video` and `bytedance/seedance-2.0`. None carries a rate:
+  Wan is billed by GPU time, and no per-second price for the other two could be
+  verified against the API, so their cost reports `UNAVAILABLE` rather than a
+  guess. Supply a `VideoPriceCatalog` to price them.
+
+  The Replicate adapter translates each model's inputs from its **published
+  schema**, because they disagree: the first frame is `image` for Wan and
+  Seedance but `start_image` for Kling; Wan sizes a clip in frames and refuses
+  `duration_seconds`, while Kling and Seedance take it directly; and Kling has
+  no resolution field at all, so `resolution="1080p"` becomes `mode="pro"`. A
+  resolution a model does not offer is refused rather than defaulted — Replicate
+  silently ignores keys it does not recognise, generates the default, and bills
+  for it. A model the package has not verified receives only prompt and first
+  frame.
 - Live tests for real image and video generation (`tests/live/test_media_live.py`),
   deselected by default like every other live test.
 - **`LLMRequest.verbosity`**, asking for a shorter or longer answer where the
@@ -86,10 +129,30 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Changed
 
-- `CATALOG_VERSION` is now `2026-08-05.2`. The catalogue gained image models,
-  and Gemini image output now uses its published image-token rates (`$30`,
-  `$60` or `$120` per million) instead of the cheaper text-output rates. Both
-  per-image and image-output-token rates are covered by the price fingerprint.
+- **An unstated `VideoRequest.resolution` now means the cheapest tier the model
+  offers**, where it previously meant "whatever the provider picks". Every video
+  model catalogued here defaults to something dearer than its floor — 720p for
+  `wan-video/wan-2.2-5b-fast` and `bytedance/seedance-2.0`, `pro` (1080p) for
+  `kwaivgi/kling-v3-video` — so the request that said nothing was the one that
+  quietly cost the most. WaveSpeed now pins `480p` on MiniMax H3, whose 768p
+  tier costs twice as much.
+
+  It also makes the amount computable: an adapter that sent no resolution got
+  back a clip whose resolution it could not report, and a `VideoUsage` with no
+  resolution prices at `UNAVAILABLE`. The silent request was both the dearest
+  and the only unpriced one.
+
+  Stating a resolution still wins, and one the model does not offer now raises
+  instead of being sent for the provider to reject. A model whose tiers this
+  package has not read from a published schema gets no default at all.
+
+  **Callers relying on the provider's default get a lower-resolution clip after
+  this upgrade** and should state the resolution they want.
+- `CATALOG_VERSION` is now `2026-08-06.1`. The catalogue gained image and video
+  models, and Gemini image output now uses its published image-token rates
+  (`$30`, `$60` or `$120` per million) instead of the cheaper text-output rates.
+  Per-image, image-output-token and per-second video rates are all covered by
+  the price fingerprint.
 - The price-catalogue builders moved to `llm_gateway.catalogs`
   (`builtin_price_catalog`, `builtin_audio_price_catalog`,
   `builtin_image_price_catalog`). They are re-exported from `llm_gateway`, so

@@ -146,6 +146,22 @@ picture as tokens keeps `pricing_unit="tokens"` and is priced from
 the source image is the provider's: reject the one it cannot use rather than
 downloading or hosting it, which is application work.
 
+A video provider adds one rule on top of the image one, because its options
+move the bill by multiples rather than percentages: **an option the caller left
+unset must resolve to the cheapest thing the model offers, not to the
+provider's default.** Concretely, read the model's published input schema, list
+its resolution tiers, and send the lowest when `VideoRequest.resolution` is
+`None`. Every video provider integrated so far defaults to something dearer
+than its floor, so the request that says nothing is the one that would cost the
+most — and its resolution, coming back unstated, could not even be priced.
+
+Two limits keep that from becoming a guess. The tiers must come from the
+provider's schema, never from another model's; a model whose tiers nobody read
+gets **no** default, since an invented floor is a rejected request. And a
+resolution the model does not offer raises rather than falling back — Replicate
+in particular ignores keys it does not recognise, generates its default, and
+bills for it.
+
 A provider that supports function tools declares `function_calling=True` only
 once its adapter can do the whole round trip against a fake client: send the
 declarations, read the calls back with the provider's own ids, and put a

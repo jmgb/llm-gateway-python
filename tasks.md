@@ -261,54 +261,87 @@
   out of token accounting. See `[Unreleased]` in `CHANGELOG.md` and the image
   sections of `README.md` and `docs/pricing.md`.
 
-- [~] **P4 — Add provider-neutral video generation.** WaveSpeed's polled
-  image-to-video is shipped (`VideoRequest`, `LLMGateway.generate_video()`,
-  per-second cost by resolution). What remains is below: the webhook-shaped
-  providers.
+- [x] **P4 — Add provider-neutral video generation.** Both shapes are shipped:
+  WaveSpeed's polled image-to-video (`VideoRequest`,
+  `LLMGateway.generate_video()`, per-second cost by resolution) and Replicate's
+  submitted job (`VideoJob`, `LLMGateway.submit_video()` / `poll_video()`,
+  `webhook_url`, cost `UNAVAILABLE` because Replicate bills GPU time). The
+  design record below is kept because it is the reasoning the contract rests
+  on, not a to-do list.
 
   ### Why this belongs in the package
 
-  Two applications already generate video against the same two providers:
+  Two applications already generate video against Replicate:
 
   - VirtualAssistant (`modules/replicate_client.py`) creates Replicate
     predictions for `wan-video/wan-2.2-5b-fast`, both text-to-video and
     image-to-video, and polls or receives a webhook.
-  - Apps (`backend/app/services/replicate_client.py`, `sora_client.py`,
-    `video_generation_router.py`) runs the same Wan model plus OpenAI Sora 2,
-    behind a router that picks the client by model id — the product-side shape
-    of what the catalogue would decide here.
+  - Apps (`backend/app/services/replicate_client.py`,
+    `video_generation_router.py`) runs the same Wan model behind a router that
+    picks the client by model id — the product-side shape of what the
+    catalogue would decide here.
+
+  Both call `predictions.create`, keep the returned id, and later either call
+  `predictions.get` or receive a webhook. That is the same code written twice.
 
   The shared problem is again transport and normalisation: submitting a job,
-  correlating its id, reading its status, and pricing it per second of video.
-
-  ### What still has to be built
-
-  Replicate (Wan 2.2) and OpenAI (Sora 2), which is where the two-phase
-  contract becomes unavoidable.
+  correlating its id, reading its status, and pricing what it produced.
 
   ### What makes it a different contract from images
 
-  A video is not returned by the call that requests it. Both providers answer
-  with a job id and finish minutes later, so the neutral contract is two
-  phases — `submit()` returning a `VideoJob`, and `poll(job)` returning status
-  and result — and the polling loop, the webhook endpoint and the storage stay
-  with the application. Wrapping it in one `await` would put a four-minute
-  timeout inside `TimeoutPolicy` and make a webhook impossible.
+  A video is not returned by the call that requests it. Replicate answers with
+  a prediction id and finishes minutes later, so the neutral contract is two
+  phases — `submit_video()` returning a `VideoJob`, and `poll_video(job)`
+  returning status and result — and the polling loop, the webhook endpoint and
+  the storage stay with the application. Wrapping it in one `await` would put
+  a four-minute timeout inside `TimeoutPolicy` and make a webhook impossible.
 
-  Sora adds a second wrinkle: the finished MP4 is served from
-  `/v1/videos/{id}/content` **with** the Authorization header, so the adapter
-  must either return bytes or expose the headers needed to fetch it. A URL
-  alone would be undownloadable by the caller.
+  A `VideoJob` outlives the process that submitted it: the application stores
+  it and polls from a worker or a webhook handler, so it has to be plain
+  serialisable data, reconstructible from what a database row can hold.
 
   ### Cost
 
-  Sora publishes a per-second rate ($0.10/second at 720p for `sora-2`);
-  Replicate bills Wan by GPU time. So the catalogue needs
-  `pricing_unit="video_seconds"` for the first and no rate for the second,
-  reporting `UNAVAILABLE` rather than a guess — the same rule the image
-  catalogue already follows.
+  Replicate bills Wan by GPU time, which no request-shaped figure predicts. So
+  the catalogue carries the model with no rate and the cost reports
+  `UNAVAILABLE` rather than a guess — the same rule the image catalogue
+  already follows for `prunaai/p-image`.
 
-  ### Out of scope, as with images
+  ### Out of scope
 
   Prompt enrichment, moderation policy, per-user quotas, storage, thumbnails,
-  re-hosting and the webhook endpoint itself.
+  re-hosting, cancellation, webhook signature verification and the webhook
+  endpoint itself.
+## More Replicate video models
+
+- [x] **P5 — Catalogue and support `kwaivgi/kling-v3-video` and
+  `bytedance/seedance-2.0`.**
+
+  Both ride the `VideoJob` contract from P4. What each of them needed was the
+  per-model input translation, read from the published schema rather than
+  inferred from Wan — the three models agree on none of it:
+
+  | | first frame | duration | resolution |
+  |---|---|---|---|
+  | `wan-video/wan-2.2-5b-fast` | `image` | frames, so seconds are refused | passed through |
+  | `kwaivgi/kling-v3-video` | `start_image` | `duration`, 3-15 s | `mode`: standard/pro/4k |
+  | `bytedance/seedance-2.0` | `image` | `duration`, 3-15 s | `resolution`: 480p-4k |
+
+  A resolution a model does not offer raises rather than falling back to the
+  model's default, and a Replicate model this package has not verified receives
+  only prompt and first frame. Both rules exist because Replicate ignores keys
+  it does not recognise: the option vanishes, the default is generated, and the
+  caller pays for a clip they did not ask for.
+
+  ### What was deliberately left out
+
+  No per-second rate could be verified for either model — the API's model
+  endpoint publishes none — so both carry no rate and report `UNAVAILABLE`. If
+  a published rate is confirmed later it belongs in the catalogue with
+  `pricing_unit="video_seconds"`, alongside a `CATALOG_VERSION` bump.
+
+  Their remaining options have no second consumer and no neutral shape yet:
+  Kling's `negative_prompt`, `multi_prompt`, `end_image` and `generate_audio`,
+  and Seedance's `seed`, `last_frame_image` and the positional
+  `reference_images`/`reference_videos`/`reference_audios`. Adding any of them
+  to `VideoRequest` needs the two-consumer evidence first.

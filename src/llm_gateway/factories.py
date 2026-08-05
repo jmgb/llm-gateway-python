@@ -122,10 +122,13 @@ def create_replicate_client(*, api_key: str) -> Any:
     """Build a ``replicate.Client``."""
     _require_key(api_key)
     try:
-        import replicate
+        # From the submodule that defines it: the SDK's top-level package
+        # re-exports it without declaring it, which strict mypy rejects once
+        # the extra is actually installed.
+        from replicate.client import Client
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("replicate") from error
-    return replicate.Client(api_token=api_key)
+    return Client(api_token=api_key)
 
 
 def create_wavespeed_client(*, api_key: str) -> Any:

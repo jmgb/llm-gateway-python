@@ -307,6 +307,76 @@ usage rather than a detail of the request because the rate depends on it: a
 resolution the price table does not know costs `UNAVAILABLE`, never the
 cheaper rate.
 
+**Omit `resolution` and you get the cheapest tier the model offers**, never the
+provider's own default — which is dearer on every catalogued video model. It is
+the biggest single lever on a video bill (480p vs 768p is 2× on MiniMax H3), so
+silence buys the floor and anything above it is asked for by name. See
+[the table in `docs/pricing.md`](docs/pricing.md).
+
+### Video jobs, for providers that answer minutes later
+
+Replicate does not hand back a clip; it hands back a prediction id and finishes
+later. Waiting inside one `await` would mean a four-minute request timeout and
+no way to use the webhook, so the same `VideoRequest` takes a second route:
+
+```python
+from llm_gateway import LLMGateway, VideoJob, VideoJobStatus, VideoRequest
+from llm_gateway.factories import build_registry, create_replicate_client
+
+gateway = LLMGateway(registry=build_registry(replicate_client=create_replicate_client()))
+
+job = await gateway.submit_video(
+    VideoRequest(
+        model="wan-video/wan-2.2-5b-fast",
+        prompt="the lioness sprints and leaps at the gazelle",
+        image=ImageInput(url="https://cdn.example/first-frame.png"),
+        webhook_url="https://app.example/hooks/video",  # optional
+    )
+)
+
+job.id, job.model, job.provider, job.status  # four strings: store them
+```
+
+`VideoJob` is plain data on purpose — the process that polls is usually not the
+one that submitted. Save those four fields, rebuild it later, and read it back
+from anywhere:
+
+```python
+result = await gateway.poll_video(VideoJob(id=row.id, model=row.model, provider=row.provider))
+
+if result.job.status is VideoJobStatus.SUCCEEDED:
+    result.videos[0].url
+    result.cost.amount_usd
+elif result.job.status is VideoJobStatus.FAILED:
+    result.error  # why the provider gave up, when it says
+```
+
+A job the provider gave up on is a status, not an exception: the submission
+worked, and an application storing the outcome wants the reason rather than a
+traceback. `poll_video()` raises only when the *reading* failed.
+
+Nothing is billed until the job is terminal. A submission records no usage —
+the clip does not exist yet — and a job polled ten times is recorded once.
+
+Three Replicate video models are catalogued, and the adapter translates each
+one from its published input schema rather than a shared guess:
+
+| Model | First frame | Duration | Resolution | Sent when unset |
+|---|---|---|---|---|
+| `wan-video/wan-2.2-5b-fast` | `image` | frames — `duration_seconds` refused | `480p`/`720p` | `480p` |
+| `kwaivgi/kling-v3-video` | `start_image` | 3–15 s | `720p`/`1080p`/`4k`, sent as `mode` | `standard` (720p) |
+| `bytedance/seedance-2.0` | `image` | 3–15 s | `480p`/`720p`/`1080p`/`4k` | `480p` |
+
+That last column is the cheapest tier of each, and it is deliberately not what
+Replicate would have picked — its own defaults are 720p, `pro` (1080p) and 720p
+respectively.
+
+A resolution a model does not offer raises rather than falling back to its
+default: Replicate ignores keys it does not recognise, generates the default,
+and bills for it, so a silent drop is a clip nobody asked for on the invoice.
+None of the three has a per-second rate this package could verify, so their
+cost is `UNAVAILABLE` — pass a `VideoPriceCatalog` with your measured rates.
+
 ## The guarantees
 
 These are enforced by tests, not by convention:
@@ -346,7 +416,7 @@ that application's local adapter.
 | Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the schema is described in the messages and the gateway validates after |
 | AssemblyAI | `[assemblyai]` | REST submit/poll transcription API |
 | OpenRouter | `[openrouter]` | Chat Completions. Aggregator: declares the floor every route honours, not the best case |
-| Replicate | `[replicate]` | Image generation and editing. Answers with a URL, and fetches the source image from one |
+| Replicate | `[replicate]` | Image generation and editing, plus video as a submitted job. Answers with a URL, and fetches the source image from one |
 | WaveSpeed | `[wavespeed]` | REST submit/poll. Text-to-image, and image-to-video billed per second |
 
 Capabilities are declared per provider and never faked as identical — query
@@ -382,8 +452,11 @@ and the Responses adapter appends them to the last user message as
 than silently dropping the files. OpenAI, Groq and AssemblyAI expose
 `audio_transcription=True` through the separate `TranscriptionRequest` API,
 and Gemini, Replicate and WaveSpeed expose `image_generation=True` through
-`ImageRequest`. WaveSpeed also declares `video_generation=True` and
-`video_from_image=True`, reached through `VideoRequest`.
+`ImageRequest`. WaveSpeed and Replicate both declare `video_generation=True`
+and `video_from_image=True`, reached through `VideoRequest` — WaveSpeed by
+awaiting `generate_video()`, Replicate through `submit_video()` and
+`poll_video()`. Only Replicate declares `video_webhooks=True`, so an
+application can ask whether it must poll before committing to a design.
 
 Request options are adapted per model before each API attempt. A model that
 rejects `temperature` — the OpenAI 5.6 family — never receives it, including
@@ -470,12 +543,10 @@ catalog protocol yourself. See
 
 Inline files, streaming and Gemini File Search remain absent, and so do
 provider-hosted tools — web search, code execution, file search — and any
-package-owned loop that would execute a function for you. Nor is there yet a
-video provider that answers only through a webhook — `VideoRequest` polls, so
-Replicate's predictions and Sora's jobs need a two-phase contract this version
-does not have. Function tools, remote file IDs for OpenAI, audio
-transcription, image generation and polled video generation are supported with
-their own capability and cost contracts.
+package-owned loop that would execute a function for you. Function tools,
+remote file IDs for OpenAI, audio transcription, image generation and video
+generation — both the polled shape and the submit/poll job shape — are
+supported with their own capability and cost contracts.
 
 ## Documentation
 

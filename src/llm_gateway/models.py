@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-08-05.2"
+CATALOG_VERSION = "2026-08-06.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -509,6 +509,39 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         supports_temperature=False,
         pricing_unit="images",
         modality="image",
+    ),
+    _m(
+        "wan-video/wan-2.2-5b-fast",
+        "replicate",
+        "0",
+        "0",
+        notes="text-to-video and image-to-video, billed by GPU time, so no "
+        "per-second rate exists to publish; supply a VideoPriceCatalog to price it",
+        supports_temperature=False,
+        pricing_unit="video_seconds",
+        modality="video",
+    ),
+    _m(
+        "kwaivgi/kling-v3-video",
+        "replicate",
+        "0",
+        "0",
+        notes="3-15s clips; 'mode' selects 720p/1080p/4K. No per-second rate "
+        "verified against the API, so cost reports UNAVAILABLE rather than a guess",
+        supports_temperature=False,
+        pricing_unit="video_seconds",
+        modality="video",
+    ),
+    _m(
+        "bytedance/seedance-2.0",
+        "replicate",
+        "0",
+        "0",
+        notes="3-15s clips at 480p-4K. No per-second rate verified against the "
+        "API, so cost reports UNAVAILABLE rather than a guess",
+        supports_temperature=False,
+        pricing_unit="video_seconds",
+        modality="video",
     ),
     # ---- WaveSpeed ------------------------------------------------------
     _m(

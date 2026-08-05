@@ -197,17 +197,64 @@ Video is billed per second, and the rate depends on the resolution:
 | Model | Provider | 480p | 768p |
 |---|---|---:|---:|
 | `wavespeed-ai/minimax-h3/image-to-video` | WaveSpeed | `$0.04` / second | `$0.08` / second |
+| `wan-video/wan-2.2-5b-fast` | Replicate | *no published rate* | *no published rate* |
+| `kwaivgi/kling-v3-video` | Replicate | *no verified rate* | *no verified rate* |
+| `bytedance/seedance-2.0` | Replicate | *no verified rate* | *no verified rate* |
 
 `StaticVideoPriceCatalog` prices `VideoUsage.seconds` at the rate for
-`VideoUsage.resolution`. A resolution the table does not know — including none
-at all, when the caller left it to the provider's default — yields
+`VideoUsage.resolution`. A resolution the table does not know yields
 `UNAVAILABLE` rather than the cheaper rate: assuming 480p on a 768p clip would
 halve a real invoice.
+
+### The default resolution is always the model's cheapest tier
+
+Resolution is the single biggest lever on a video bill — on MiniMax H3 it is
+the difference between `$0.04` and `$0.08` per second, and Kling's tiers span
+720p to 4K. So `VideoRequest.resolution` left unset does **not** fall through
+to the provider's own default. The adapter sends the lowest tier its model
+offers, and anything above it has to be named:
+
+| Model | Provider's default | What this package sends |
+|---|---|---|
+| `wavespeed-ai/minimax-h3/image-to-video` | unset | `480p` |
+| `wan-video/wan-2.2-5b-fast` | `720p` | `480p` |
+| `kwaivgi/kling-v3-video` | `pro` (1080p) | `standard` (720p) |
+| `bytedance/seedance-2.0` | `720p` | `480p` |
+
+Every one of those providers defaults to something dearer than its floor, so
+the request that says nothing is exactly the one that would quietly cost the
+most.
+
+It also keeps the amount computable. An adapter that sent no resolution would
+get one back that it could not report, and `VideoUsage.resolution` of `None`
+prices at `UNAVAILABLE` — so the silent request would be both the dearest and
+the only unpriced one.
+
+This holds in tests too, live ones included: the live suite animates its frame
+at 480p on MiniMax H3 and 720p on Kling, the floor of each.
+
+A model whose tiers this package has not read from a published schema gets no
+default. Guessing a floor produces a rejected request, which is worse than
+letting the provider choose.
 
 WaveSpeed reports no clip length of its own and snaps output to the model's
 frame grid, so its adapter reports the requested duration as an estimate. The
 amount is therefore `ESTIMATED`, never `ACTUAL` — an honest lower-confidence
 figure rather than a measurement nobody took.
 
+Replicate bills Wan by GPU time, which no per-second table predicts and which
+the prediction does not report. The catalogue therefore carries the model with
+no rate at all and its cost is `UNAVAILABLE` — the same answer the image
+catalogue gives for `prunaai/p-image`, and for the same reason: an invented
+number is worse than an admitted gap. Applications with a measured
+cost-per-clip supply a `VideoPriceCatalog` of their own.
+
 Video retries and fallbacks are represented by `VideoAttempt`/`VideoExecution`
 and recorded through `VideoUsageSink`.
+
+### When a job is billed
+
+`submit_video()` records nothing: at that point the clip does not exist, so any
+amount would be invented. Neither does a poll that finds the job still running
+— a job polled ten times is billed once. The poll that finds a terminal state
+is the one that prices what was produced and writes the usage record.
