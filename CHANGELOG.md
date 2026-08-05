@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-06
+
 ### Added
 
 - Provider-neutral **image generation and editing**: `ImageRequest`,
