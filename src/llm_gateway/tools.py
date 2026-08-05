@@ -76,6 +76,12 @@ class ToolCall:
     name: str
     arguments: Mapping[str, Any]
 
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("a tool call needs the provider's correlation id")
+        if not self.name.strip():
+            raise ValueError("a tool call needs a function name")
+
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:

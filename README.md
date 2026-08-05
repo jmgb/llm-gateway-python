@@ -334,7 +334,8 @@ job = await gateway.submit_video(
     )
 )
 
-job.id, job.model, job.provider, job.status  # four strings: store them
+job.id, job.model, job.provider, job.status  # required provider state
+job.request_id, job.source  # optional accounting correlation: store them too
 ```
 
 `VideoJob` is plain data on purpose — the process that polls is usually not the

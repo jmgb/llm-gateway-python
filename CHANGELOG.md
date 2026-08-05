@@ -9,17 +9,38 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- Provider-neutral function tool calling for OpenAI and Groq through
+  `FunctionTool`, `ToolChoice`, `RequiredTool`, `ToolCall`, `ToolResult` and
+  `LLMResult.tool_calls`. Calls are translated and correlated but never
+  executed, and malformed or undeclared calls remain billed failures.
+- Submitted video jobs through `LLMGateway.submit_video()` and
+  `LLMGateway.poll_video()`, including Replicate text/image-to-video support,
+  webhook registration and catalogue entries for Wan 2.2, Kling v3 and
+  Seedance 2.0.
+- `LLMRequest.verbosity` for supported OpenAI GPT-5 models and typed
+  `LLMRequest.routing` preferences for OpenRouter.
+
+### Changed
+
+- An unstated video resolution now selects the cheapest verified tier for the
+  model instead of accepting a more expensive provider default. Unsupported
+  resolutions are rejected rather than silently ignored.
+- `CATALOG_VERSION` is now `2026-08-06.1` after adding the Replicate video
+  models to the modality and price fingerprints.
+
 ### Fixed
 
-- **Replicate reports the length of the clip it produced, and 0.11.0 discarded
-  it.** A finished prediction carries `metrics.video_output_duration_seconds`,
+- **Replicate reports the length of the clip it produced, and the new job path
+  discarded it.** A finished prediction carries `metrics.video_output_duration_seconds`,
   measured on the video that was generated, plus `model_variant` — the tier
   that actually ran. The adapter now reads both, so `VideoUsage.seconds` is
   real usage rather than `None` and `VideoUsage.resolution` comes back in the
   package's own spelling. Anyone supplying a `VideoPriceCatalog` gets a
   computed amount where the answer used to be `UNAVAILABLE`. A prediction that
   reports no metrics still leaves the length unknown, never zero.
-- **A video job's cost is attributable again.** `VideoJob` gained `request_id`
+- **A video job's cost remains attributable.** `VideoJob` gained `request_id`
   and `source`, copied from the `VideoRequest` at submission, and the terminal
   poll now records them. Previously both reached the usage sink as `None`, so
   the one operation billed minutes later from another process was also the one
@@ -31,34 +52,27 @@ consumer pins an immutable tag and upgrades through its own pull request.
   `TimeoutPolicy` — which let a provider that stopped answering block the
   worker that polled it indefinitely. The bound is on the status call, never on
   the job, which is expected to run for minutes.
+- `submit_video()` now enforces the total `TimeoutPolicy` budget across provider
+  attempts and retry delays, not only each per-attempt timeout. Interrupted
+  submissions are retained as potentially billable attempts because a remote
+  provider may have accepted the job before the local timeout fired.
+- Polling rejects non-positive and non-finite timeout values before dispatch,
+  terminal job events retain the original `request_id` and `source`, and
+  submission lifecycle events now use their job-specific name and report the
+  successful attempt in their attempt count.
+- Replicate treats non-finite duration metrics as unknown instead of allowing
+  them to escape as invalid usage.
+- OpenAI and Groq no longer invent tool-call correlation ids. A provider reply
+  without its real id is a billed output-parsing failure, because a synthetic
+  id cannot be used for a valid continuation. Manually constructed tool calls
+  also reject blank ids and function names.
+- OpenRouter provider-routing preferences now travel through the OpenAI SDK's
+  `extra_body` passthrough instead of being supplied as an unsupported SDK
+  keyword argument.
 
 ## [0.11.0] — 2026-08-06
 
 ### Added
-
-- Provider-neutral **function tool calling**: `FunctionTool`, `ToolChoice`,
-  `RequiredTool`, `ToolCall` and `ToolResult`, reached through
-  `LLMRequest.tools`, `LLMRequest.tool_choice` and `LLMRequest.tool_results`,
-  and answered through `LLMResult.tool_calls`. **OpenAI** and **Groq** declare
-  `function_calling=True` — the Responses API's flat tool and `function_call`
-  items, and Chat Completions' nested function and `message.tool_calls` — and
-  Gemini and OpenRouter reject a request carrying tools instead of answering
-  prose where a call was expected.
-
-  The package translates and correlates; it does not execute. An application
-  receives typed calls, runs its own functions under its own permission checks,
-  and supplies typed results in the next request. `ToolResult` holds the
-  `ToolCall` it answers rather than a loose id, so a continuation cannot lose
-  the pairing the providers need back on the wire.
-
-  A tool call is a **successful** attempt: there is no text to parse and no
-  schema to satisfy, and a requested JSON format is not applied to a reply that
-  contains no answer. Arguments that do not parse, that are not a JSON object,
-  or that name a function the request never declared are a **billed failure**,
-  so the fallback still gets its turn and the tokens are still counted — with
-  the arguments themselves kept out of every message and every sink.
-
-  Requests without tools produce the same provider payload as 0.10.1.
 
 - Provider-neutral **image generation and editing**: `ImageRequest`,
   `ImageInput`, `GeneratedImage`, `ImageResult` and `LLMGateway.generate_image()`,
@@ -82,102 +96,15 @@ consumer pins an immutable tag and upgrades through its own pull request.
   image), `wavespeed-ai/hidream-i1-dev` (USD 0.012 per image), `prunaai/p-image` and
   `bytedance/seedream-4` (no published per-image rate, so their cost reports
   `UNAVAILABLE` rather than zero), plus a `modality` field on `ModelInfo`.
-- **Video jobs**, for providers whose clip arrives minutes after the call:
-  `LLMGateway.submit_video()` returns a `VideoJob`, `LLMGateway.poll_video()`
-  reads it back, and `VideoJobStatus`, `VideoJobResult`,
-  `ProviderVideoJobUpdate` and `VideoJobProviderAdapter` complete the contract.
-  The Replicate adapter implements it for `wan-video/wan-2.2-5b-fast`, both
-  text-to-video and image-to-video, over `predictions.create`/`predictions.get`.
-
-  Two applications were already writing this twice: create a prediction, keep
-  the id, then either poll it from a worker or wait for the webhook. Awaiting
-  it instead would put a four-minute timeout inside `TimeoutPolicy` and leave
-  no way to use the webhook at all, so `generate_video()` stays for providers
-  the adapter can poll from the inside and this is the second route.
-
-  `VideoJob` is four fields of plain data — id, model, provider, status —
-  because the process that polls is rarely the one that submitted, and what it
-  needs has to survive a database row. It records the model and provider that
-  *hold* the job, which after a fallback are not the ones requested.
-
-  Nothing is billed until the job is terminal: a submission has produced no
-  clip, and a job polled ten times is recorded once. A job the provider gave up
-  on is a status carrying its reason, not an exception; `poll_video()` raises
-  only when the reading itself failed.
-- **`VideoRequest.webhook_url`**, registering where a job-shaped provider should
-  announce that it finished, and `ProviderCapabilities.video_webhooks` for
-  asking first. Receiving the callback and verifying its signature stay with
-  the application; an adapter whose provider has no webhook refuses the field
-  rather than dropping it, since a caller who believes it registered one waits
-  forever.
-- Catalogue entries for the Replicate video models `wan-video/wan-2.2-5b-fast`,
-  `kwaivgi/kling-v3-video` and `bytedance/seedance-2.0`. None carries a rate:
-  Wan is billed by GPU time, and no per-second price for the other two could be
-  verified against the API, so their cost reports `UNAVAILABLE` rather than a
-  guess. Supply a `VideoPriceCatalog` to price them.
-
-  The Replicate adapter translates each model's inputs from its **published
-  schema**, because they disagree: the first frame is `image` for Wan and
-  Seedance but `start_image` for Kling; Wan sizes a clip in frames and refuses
-  `duration_seconds`, while Kling and Seedance take it directly; and Kling has
-  no resolution field at all, so `resolution="1080p"` becomes `mode="pro"`. A
-  resolution a model does not offer is refused rather than defaulted — Replicate
-  silently ignores keys it does not recognise, generates the default, and bills
-  for it. A model the package has not verified receives only prompt and first
-  frame.
 - Live tests for real image and video generation (`tests/live/test_media_live.py`),
   deselected by default like every other live test.
-- **`LLMRequest.verbosity`**, asking for a shorter or longer answer where the
-  provider offers the dial. OpenAI declares `verbosity=True` and sends it for
-  the `gpt-5` families, alongside any requested response format rather than
-  instead of it. It is not `max_output_tokens`, which truncates an answer
-  already being written and pays for every token up to the cut.
-
-  Two consumers were keeping the option out of this package: their calls set
-  `verbosity="low"` on every OpenAI request, so routing one through the gateway
-  silently bought longer answers at the output rate. Both had to exclude
-  OpenAI from the neutral path to avoid it.
-
-- **`LLMRequest.routing`** and `RoutingPreference(order=..., optimise_for=...)`,
-  stating which upstream should serve the call. Only an aggregator has that
-  choice, so OpenRouter is the one adapter declaring `upstream_routing=True`.
-  Stating nothing is the default and is not the same as stating an empty
-  preference: only the halves a caller filled in are sent, because a blank
-  instruction would override the aggregator's own routing.
-
-  Modelled as a typed preference rather than a provider dictionary on purpose.
-  A passthrough field would carry anything a caller put in it straight to the
-  API, past every capability the package declares.
-
-- `ProviderCapabilities.verbosity` and `ProviderCapabilities.upstream_routing`,
-  both defaulting to `False`, so an adapter promises neither by silence.
 
 ### Changed
 
-- **An unstated `VideoRequest.resolution` now means the cheapest tier the model
-  offers**, where it previously meant "whatever the provider picks". Every video
-  model catalogued here defaults to something dearer than its floor — 720p for
-  `wan-video/wan-2.2-5b-fast` and `bytedance/seedance-2.0`, `pro` (1080p) for
-  `kwaivgi/kling-v3-video` — so the request that said nothing was the one that
-  quietly cost the most. WaveSpeed now pins `480p` on MiniMax H3, whose 768p
-  tier costs twice as much.
-
-  It also makes the amount computable: an adapter that sent no resolution got
-  back a clip whose resolution it could not report, and a `VideoUsage` with no
-  resolution prices at `UNAVAILABLE`. The silent request was both the dearest
-  and the only unpriced one.
-
-  Stating a resolution still wins, and one the model does not offer now raises
-  instead of being sent for the provider to reject. A model whose tiers this
-  package has not read from a published schema gets no default at all.
-
-  **Callers relying on the provider's default get a lower-resolution clip after
-  this upgrade** and should state the resolution they want.
-- `CATALOG_VERSION` is now `2026-08-06.1`. The catalogue gained image and video
-  models, and Gemini image output now uses its published image-token rates
-  (`$30`, `$60` or `$120` per million) instead of the cheaper text-output rates.
-  Per-image, image-output-token and per-second video rates are all covered by
-  the price fingerprint.
+- `CATALOG_VERSION` is now `2026-08-05.2`. The catalogue gained image models,
+  and Gemini image output now uses its published image-token rates (`$30`,
+  `$60` or `$120` per million) instead of the cheaper text-output rates. Both
+  per-image and image-output-token rates are covered by the price fingerprint.
 - The price-catalogue builders moved to `llm_gateway.catalogs`
   (`builtin_price_catalog`, `builtin_audio_price_catalog`,
   `builtin_image_price_catalog`). They are re-exported from `llm_gateway`, so

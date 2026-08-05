@@ -207,6 +207,13 @@ class TestOpenAIReadsCalls:
         assert response.tool_calls == ()
         assert response.output_text == "Sunny"
 
+    async def test_it_does_not_invent_a_missing_call_id(self) -> None:
+        recorder = Recorder(_responses_reply(_function_call_item("", "get_weather", "{}")))
+
+        response = await OpenAIAdapter(self._client(recorder)).generate(_request(), model="gpt-x")
+
+        assert response.tool_calls[0].id == ""
+
 
 class TestOpenAIContinues:
     def _client(self, recorder: Recorder) -> Any:
@@ -339,6 +346,13 @@ class TestGroqReadsCalls:
 
         assert response.tool_calls == ()
         assert response.output_text == "Sunny"
+
+    async def test_it_does_not_invent_a_missing_call_id(self) -> None:
+        recorder = Recorder(_chat_reply(_chat_tool_call("", "get_weather", "{}")))
+
+        response = await GroqAdapter(self._client(recorder)).generate(_request(), model="llama")
+
+        assert response.tool_calls[0].id == ""
 
 
 class TestGroqContinues:

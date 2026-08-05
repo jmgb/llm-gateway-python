@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from typing import Any
 
@@ -960,7 +961,7 @@ class TestReplicateReportsWhatItActuallyMeasures:
         assert update.usage.seconds is None
         assert update.usage.videos == 1
 
-    @pytest.mark.parametrize("bad", ["", None, -1, "five"])
+    @pytest.mark.parametrize("bad", ["", None, -1, "five", math.inf])
     async def test_an_unusable_duration_is_unknown_rather_than_wrong(self, bad: Any) -> None:
         client = _client(self._finished(video_output_duration_seconds=bad))
 

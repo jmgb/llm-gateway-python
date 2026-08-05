@@ -21,6 +21,7 @@ the page.
 from __future__ import annotations
 
 import base64
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -256,7 +257,7 @@ def _measured_seconds(metrics: Any) -> float | None:
         seconds = float(metrics.get("video_output_duration_seconds"))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    return seconds if seconds > 0 else None
+    return seconds if seconds > 0 and math.isfinite(seconds) else None
 
 
 def _measured_resolution(metrics: Any, model: str) -> str | None:

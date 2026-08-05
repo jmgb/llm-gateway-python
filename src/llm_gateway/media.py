@@ -307,7 +307,7 @@ class VideoJob:
     Plain, storable data on purpose. Minutes pass between submission and
     result, so the process that polls is usually not the one that submitted:
     a worker reading a database row, or a webhook handler holding nothing but
-    what it saved. Everything needed to poll fits in four strings.
+    what it saved. Everything needed to poll fits in plain scalar fields.
 
     ``model`` and ``provider`` are the ones that *hold* the job, which after a
     fallback is not the model that was requested. Polling the requested one

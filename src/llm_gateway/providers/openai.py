@@ -222,15 +222,17 @@ def _tool_calls(raw: Any) -> tuple[ProviderToolCall, ...]:
     """Read the calls out of an output list that also carries reasoning items."""
     items = getattr(raw, "output", None) or ()
     calls: list[ProviderToolCall] = []
-    for index, item in enumerate(items):
+    for item in items:
         if getattr(item, "type", None) != "function_call":
             continue
         arguments = getattr(item, "arguments", "")
+        call_id = getattr(item, "call_id", None)
         calls.append(
             ProviderToolCall(
                 # `call_id` is the one the continuation must quote; `id` is the
-                # output item's own and is not interchangeable with it.
-                id=getattr(item, "call_id", None) or getattr(item, "id", None) or f"call_{index}",
+                # output item's own and is not interchangeable with it. Keep a
+                # missing id empty so the gateway can reject and account for it.
+                id=str(call_id) if call_id else "",
                 name=getattr(item, "name", ""),
                 arguments=(
                     json.dumps(arguments, ensure_ascii=False)

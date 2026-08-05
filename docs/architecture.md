@@ -112,12 +112,12 @@ wait: they store the id, then either poll it from a worker or let Replicate's
 webhook wake them. Wrapping that in one `await` would put a four-minute
 timeout inside `TimeoutPolicy` and make the webhook impossible.
 
-So `VideoJob` is deliberately four fields of plain data — id, model, provider,
-status. The process that polls is usually not the one that submitted, and
-everything it needs has to survive a database row. It carries the model and
-provider that *hold* the job rather than the ones requested, because after a
-fallback those differ, and polling the requested one asks the wrong provider
-for an id it never issued.
+So `VideoJob` is deliberately plain data — id, model, provider, status, plus
+optional request/source correlation. The process that polls is usually not the
+one that submitted, and everything it needs has to survive a database row. It
+carries the model and provider that *hold* the job rather than the ones
+requested, because after a fallback those differ. Polling the requested one
+asks the wrong provider for an id it never issued.
 
 The split is expressed as two adapter protocols rather than optional methods
 on one, so `isinstance` turns "this provider does not work that way" into an

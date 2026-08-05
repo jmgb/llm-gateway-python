@@ -184,14 +184,15 @@ def _tool_choice(choice: ToolChoice | RequiredTool | None) -> Any:
 def _tool_calls(choice: Any) -> tuple[ProviderToolCall, ...]:
     raw_calls = getattr(getattr(choice, "message", None), "tool_calls", None) or ()
     calls: list[ProviderToolCall] = []
-    for index, raw in enumerate(raw_calls):
+    for raw in raw_calls:
         function = getattr(raw, "function", None)
         name = getattr(function, "name", None)
         if not name:
             continue
+        call_id = getattr(raw, "id", None)
         calls.append(
             ProviderToolCall(
-                id=getattr(raw, "id", None) or f"call_{index}",
+                id=str(call_id) if call_id else "",
                 name=name,
                 arguments=getattr(function, "arguments", "") or "",
             )

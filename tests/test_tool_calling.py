@@ -150,6 +150,11 @@ class TestTheToolContract:
         with pytest.raises(TypeError):
             ToolResult(output="sunny")  # type: ignore[call-arg]
 
+    @pytest.mark.parametrize(("call_id", "name"), [("", "get_weather"), ("call_1", " ")])
+    def test_a_call_needs_its_provider_id_and_function_name(self, call_id: str, name: str) -> None:
+        with pytest.raises(ValueError):
+            ToolCall(id=call_id, name=name, arguments={})
+
 
 class TestReceivingCalls:
     async def test_a_tool_call_is_a_successful_attempt(self) -> None:
@@ -239,6 +244,16 @@ class TestArgumentsThatCannotBeHandedOver:
             await _gateway(adapter).generate(_request())
 
         assert raised.value.attempts[0].failure_phase is FailurePhase.OUTPUT_PARSING
+
+    async def test_a_call_without_its_provider_correlation_id_fails_the_attempt(self) -> None:
+        adapter = FakeAdapter(_calls(_provider_call("", "get_weather", "{}")))
+
+        with pytest.raises(AllAttemptsFailed) as raised:
+            await _gateway(adapter).generate(_request())
+
+        attempt = raised.value.attempts[0]
+        assert attempt.failure_phase is FailurePhase.OUTPUT_PARSING
+        assert attempt.billable is True
 
     async def test_the_attempt_is_still_billed(self) -> None:
         """The provider answered. That it answered unusably changes no invoice."""

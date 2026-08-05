@@ -33,7 +33,8 @@ CAPABILITIES = ProviderCapabilities(
     # not apply is worse than one that was never claimed.
     structured_outputs=False,
     json_mode=True,
-    # No request field asks for tools, so declaring them promises nothing.
+    # Tool calling is model-dependent across routes, so the adapter rejects it
+    # instead of promising support that an upstream may silently ignore.
     function_calling=False,
     inline_files=False,
     remote_files=False,
@@ -70,7 +71,10 @@ class OpenRouterAdapter:
         if request.max_output_tokens is not None:
             kwargs["max_tokens"] = request.max_output_tokens
         if request.routing.stated:
-            kwargs["provider"] = _provider_routing(request.routing)
+            # `provider` belongs to OpenRouter's request body, not to the
+            # OpenAI SDK signature used as transport. Provider-only fields
+            # must travel through the SDK's explicit passthrough.
+            kwargs["extra_body"] = {"provider": _provider_routing(request.routing)}
         if request.response_format in (ResponseFormat.JSON_OBJECT, ResponseFormat.JSON_SCHEMA):
             # Schema enforcement depends on the model behind the route, so the
             # most this provider can honestly ask for is JSON. The gateway

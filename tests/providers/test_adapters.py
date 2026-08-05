@@ -485,7 +485,7 @@ class TestOpenRouterAdapter:
             _request(routing=RoutingPreference(order=("Groq", "SambaNova"))), model="x/y"
         )
 
-        assert recorder.kwargs["provider"] == {"order": ["Groq", "SambaNova"]}
+        assert recorder.kwargs["extra_body"] == {"provider": {"order": ["Groq", "SambaNova"]}}
 
     @pytest.mark.parametrize("goal", ("throughput", "price", "latency"))
     async def test_it_forwards_what_the_route_should_optimise_for(
@@ -497,7 +497,7 @@ class TestOpenRouterAdapter:
             _request(routing=RoutingPreference(optimise_for=goal)), model="x/y"
         )
 
-        assert recorder.kwargs["provider"] == {"sort": goal}
+        assert recorder.kwargs["extra_body"] == {"provider": {"sort": goal}}
 
     async def test_a_request_that_states_no_preference_routes_by_the_default(self) -> None:
         """Sending an empty preference would override the aggregator's own choice."""
@@ -505,7 +505,7 @@ class TestOpenRouterAdapter:
 
         await OpenRouterAdapter(self._client(recorder)).generate(_request(), model="x/y")
 
-        assert "provider" not in recorder.kwargs
+        assert "extra_body" not in recorder.kwargs
 
     async def test_it_reports_the_model_that_actually_served_the_call(self) -> None:
         """`openrouter/auto` picks a model, so the reply names a different one."""

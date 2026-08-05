@@ -11,6 +11,7 @@ job is its own contract: `submit_video()` hands back something storable, and
 from __future__ import annotations
 
 import asyncio
+import math
 from decimal import Decimal
 
 import pytest
@@ -19,6 +20,7 @@ from llm_gateway import (
     AllVideosFailed,
     ConfigurationError,
     CostMeasurement,
+    FailurePhase,
     GeneratedVideo,
     ImageInput,
     LLMGateway,
@@ -31,6 +33,7 @@ from llm_gateway import (
     RateLimitedError,
     RetryPolicy,
     StaticVideoPriceCatalog,
+    TimeoutPolicy,
     VideoJob,
     VideoJobStatus,
     VideoRate,
@@ -96,6 +99,14 @@ class VideoSink:
         self.records.append(record)
 
 
+class EventSink:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    def emit(self, event: str, fields: dict[str, object]) -> None:
+        self.events.append((event, fields))
+
+
 def _request(**kwargs: object) -> VideoRequest:
     return VideoRequest(
         model=str(kwargs.pop("model", MODEL)),
@@ -113,11 +124,15 @@ def _job(**kwargs: object) -> VideoJob:
     )
 
 
-def _gateway(*adapters: object, sink: VideoSink | None = None) -> LLMGateway:
+def _gateway(
+    *adapters: object,
+    sink: VideoSink | None = None,
+    events: EventSink | None = None,
+) -> LLMGateway:
     registry = ProviderRegistry()
     for adapter in adapters:
         registry.register(adapter, model_prefixes=())  # type: ignore[arg-type]
-    return LLMGateway(registry=registry, video_usage_sink=sink)
+    return LLMGateway(registry=registry, video_usage_sink=sink, event_sink=events)
 
 
 class TestTheJobItself:
@@ -181,6 +196,23 @@ class TestSubmitting:
         assert error.value.last_error == "RateLimitedError"
         assert sink.records[0].succeeded is False
 
+    async def test_a_failed_submission_emits_its_own_lifecycle_event(self) -> None:
+        events = EventSink()
+        adapter = RecordingJobAdapter("replicate", RateLimitedError("429"))
+
+        with pytest.raises(AllVideosFailed):
+            await _gateway(adapter, events=events).submit_video(_request())
+
+        assert events.events[0][0] == "llm_video_job_submission_failed"
+
+    async def test_a_successful_submission_counts_the_successful_provider_call(self) -> None:
+        events = EventSink()
+        adapter = RecordingJobAdapter("replicate", _job())
+
+        await _gateway(adapter, events=events).submit_video(_request())
+
+        assert events.events[0][1]["attempts"] == 1
+
     async def test_a_retried_submission_creates_exactly_one_job(self) -> None:
         """Two ids for one request would leave a clip nobody polls, and pays for."""
         adapter = RecordingJobAdapter("replicate", RateLimitedError("429"), _job(id="pred-2"))
@@ -207,6 +239,69 @@ class TestSubmitting:
 
         with pytest.raises(ConfigurationError, match="video"):
             await _gateway(adapter).submit_video(_request(model="bytedance/seedream-4"))
+
+    async def test_the_total_budget_includes_submission_retry_delays(self) -> None:
+        adapter = RecordingJobAdapter("replicate", RateLimitedError("429"), _job(id="pred-2"))
+
+        with pytest.raises(AllVideosFailed, match="total budget"):
+            await _gateway(adapter).submit_video(
+                _request(
+                    retry_policy=RetryPolicy.transient(
+                        max_attempts=2,
+                        base_delay_seconds=0.05,
+                    ),
+                    timeout_policy=TimeoutPolicy(
+                        total_seconds=0.01,
+                        per_attempt_seconds_override=1.0,
+                    ),
+                )
+            )
+
+        assert len(adapter.submitted) == 1
+
+    async def test_an_interrupted_submission_is_potentially_billable(self) -> None:
+        class SilentSubmissionAdapter(RecordingJobAdapter):
+            async def submit_video(self, request: VideoRequest, *, model: str) -> VideoJob:
+                self.submitted.append((request, model))
+                await asyncio.sleep(60)
+                raise AssertionError("the total timeout should interrupt this call")
+
+        adapter = SilentSubmissionAdapter("replicate")
+
+        with pytest.raises(AllVideosFailed) as raised:
+            await _gateway(adapter).submit_video(
+                _request(
+                    timeout_policy=TimeoutPolicy(
+                        total_seconds=0.01,
+                        per_attempt_seconds_override=1.0,
+                    )
+                )
+            )
+
+        assert len(raised.value.attempts) == 1
+        assert raised.value.attempts[0].billable is True
+        assert raised.value.attempts[0].failure_phase is FailurePhase.TIMEOUT
+
+    async def test_a_per_attempt_submission_timeout_is_potentially_billable(self) -> None:
+        class SilentSubmissionAdapter(RecordingJobAdapter):
+            async def submit_video(self, request: VideoRequest, *, model: str) -> VideoJob:
+                await asyncio.sleep(60)
+                raise AssertionError("the per-attempt timeout should interrupt this call")
+
+        adapter = SilentSubmissionAdapter("replicate")
+
+        with pytest.raises(AllVideosFailed) as raised:
+            await _gateway(adapter).submit_video(
+                _request(
+                    timeout_policy=TimeoutPolicy(
+                        total_seconds=1.0,
+                        per_attempt_seconds_override=0.01,
+                    )
+                )
+            )
+
+        assert raised.value.attempts[0].billable is True
+        assert raised.value.attempts[0].failure_phase is FailurePhase.TIMEOUT
 
 
 class TestPolling:
@@ -440,6 +535,20 @@ class TestTraceability:
 
         assert sink.records[0].request_id == "req-42"
 
+    async def test_the_terminal_event_keeps_the_original_correlation(self) -> None:
+        events = EventSink()
+        adapter = RecordingJobAdapter(
+            "replicate",
+            ProviderVideoJobUpdate(status=VideoJobStatus.FAILED, error="boom"),
+        )
+
+        await _gateway(adapter, events=events).poll_video(
+            _job(request_id="req-42", source="wildlife-clip")
+        )
+
+        assert events.events[0][1]["request_id"] == "req-42"
+        assert events.events[0][1]["source"] == "wildlife-clip"
+
     async def test_correlation_survives_a_round_trip_through_plain_data(self) -> None:
         """It is only useful if it reaches the worker that polls."""
         job = _job(request_id="req-42", source="wildlife-clip")
@@ -466,6 +575,15 @@ class TestTraceability:
 
 
 class TestPollingIsBounded:
+    @pytest.mark.parametrize("timeout", [0.0, -1.0, math.inf, math.nan])
+    async def test_a_polling_timeout_must_be_positive_and_finite(self, timeout: float) -> None:
+        adapter = RecordingJobAdapter(
+            "replicate", ProviderVideoJobUpdate(status=VideoJobStatus.RUNNING)
+        )
+
+        with pytest.raises(ValueError, match="timeout"):
+            await _gateway(adapter).poll_video(_job(), timeout_seconds=timeout)
+
     async def test_a_provider_that_never_answers_a_poll_does_not_hang_forever(self) -> None:
         """A worker blocked on one status call stops draining its queue."""
 

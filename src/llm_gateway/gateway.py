@@ -545,6 +545,8 @@ def _tool_calls(response: ProviderResponse, request: LLMRequest) -> tuple[ToolCa
     declared = {tool.name for tool in request.tools}
     calls: list[ToolCall] = []
     for raw in response.tool_calls:
+        if not isinstance(raw.id, str) or not raw.id.strip():
+            raise OutputParsingError("the provider returned a tool call without a correlation id")
         if raw.name not in declared:
             raise OutputParsingError(
                 f"the provider called {raw.name!r}, which this request did not declare"

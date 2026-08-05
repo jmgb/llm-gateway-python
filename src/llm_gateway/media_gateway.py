@@ -14,6 +14,7 @@ mypy nor a reader chasing where a video second was priced.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import replace
 
@@ -395,6 +396,29 @@ class VideoGateway:
         """
         attempts: list[VideoAttempt] = []
         started = time.perf_counter()
+        try:
+            async with asyncio.timeout(request.timeout_policy.total_seconds):
+                return await self._submit_video(request, attempts, started=started)
+        except TimeoutError:
+            self._report_failure(
+                request,
+                attempts,
+                started=started,
+                event="llm_video_job_submission_failed",
+            )
+            raise AllVideosFailed(
+                f"the video submission exceeded its total budget of "
+                f"{request.timeout_policy.total_seconds}s after {len(attempts)} attempt(s)",
+                attempts=tuple(attempts),
+            ) from None
+
+    async def _submit_video(
+        self,
+        request: VideoRequest,
+        attempts: list[VideoAttempt],
+        *,
+        started: float,
+    ) -> VideoJob:
         # Resolved up front, so a provider that cannot take a job at all says
         # so before the first request rather than after the last retry.
         plan = [request.model, *request.fallback_policy.models]
@@ -426,7 +450,7 @@ class VideoGateway:
                         "provider": outcome.provider,
                         "requested_model": request.model,
                         "model_used": outcome.model,
-                        "attempts": len(attempts),
+                        "attempts": len(attempts) + 1,
                         "status": outcome.status.value,
                     },
                 )
@@ -435,7 +459,12 @@ class VideoGateway:
                 return outcome
             last_failure = outcome
 
-        self._report_failure(request, attempts, started=started)
+        self._report_failure(
+            request,
+            attempts,
+            started=started,
+            event="llm_video_job_submission_failed",
+        )
         raise AllVideosFailed(
             f"all {len(attempts)} video submission(s) failed for model {request.model!r}",
             attempts=tuple(attempts),
@@ -459,6 +488,25 @@ class VideoGateway:
                 assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
                 async with asyncio.timeout(request.timeout_policy.per_attempt_seconds):
                     job = await adapter.submit_video(request, model=model)
+            except asyncio.CancelledError:
+                # The outer total budget may expire after the provider has
+                # accepted the submission but before its id reaches us. That
+                # can leave a billable orphan, so it cannot be recorded free.
+                attempts.append(
+                    _record_video_attempt(
+                        index=len(attempts) + 1,
+                        model=model,
+                        provider=adapter.name,
+                        outcome="failed",
+                        usage=VideoUsage.unknown(),
+                        cost=VideoCost.unavailable(pricing_version=self._prices.version),
+                        started=attempt_started,
+                        error_type=ProviderTimeoutError.__name__,
+                        billable=True,
+                        failure_phase=FailurePhase.TIMEOUT,
+                    )
+                )
+                raise
             except TimeoutError as error:
                 failure: LLMGatewayError = ProviderTimeoutError(
                     f"video submission exceeded {request.timeout_policy.per_attempt_seconds}s"
@@ -480,9 +528,9 @@ class VideoGateway:
                     cost=VideoCost.unavailable(pricing_version=self._prices.version),
                     started=attempt_started,
                     error_type=type(failure).__name__,
-                    # A submission that never produced a job produced no clip,
-                    # so unlike a generation attempt it was not billed.
-                    billable=False,
+                    # A timeout may have accepted a job whose id never reached
+                    # us. Other failures produced no job and no clip.
+                    billable=isinstance(failure, ProviderTimeoutError),
                     failure_phase=_phase_of(failure),
                 )
             )
@@ -507,6 +555,9 @@ class VideoGateway:
         ``VideoRequest``, and an unbounded one blocks the worker that made it
         on a provider that stopped answering.
         """
+        if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
+            raise ValueError("polling timeout must be positive and finite")
+
         adapter = self._registry.by_name(job.provider)
         _require_job_provider(adapter)
         assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
@@ -575,6 +626,8 @@ class VideoGateway:
         self._events.emit(
             "llm_video_job_succeeded" if succeeded else "llm_video_job_failed",
             {
+                "request_id": job.request_id,
+                "source": job.source,
                 "provider": job.provider,
                 "requested_model": job.model,
                 "model_used": job.model,
@@ -734,6 +787,7 @@ class VideoGateway:
         attempts: list[VideoAttempt],
         *,
         started: float | None = None,
+        event: str = "llm_video_generation_failed",
     ) -> None:
         usage, cost = _aggregate_video(attempts)
         elapsed_ms = int((time.perf_counter() - started) * 1000) if started is not None else 0
@@ -746,7 +800,7 @@ class VideoGateway:
         )
         self._record(request, execution, usage=usage, cost=cost, succeeded=False)
         self._events.emit(
-            "llm_video_generation_failed",
+            event,
             _video_event_fields(request, execution, usage=usage, cost=cost),
         )
 
