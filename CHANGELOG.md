@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-06
+
 ### Added
 
 - Provider-neutral function tool calling for OpenAI and Groq through
