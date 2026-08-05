@@ -40,6 +40,8 @@ REQUEST_FIELD_FOR_CAPABILITY = {
     "json_mode": "response_format",
     "reasoning_effort": "reasoning_effort",
     "conversation_history": "messages",
+    "verbosity": "verbosity",
+    "upstream_routing": "routing",
 }
 
 

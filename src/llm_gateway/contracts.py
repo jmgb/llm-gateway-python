@@ -14,12 +14,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from llm_gateway.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
+from llm_gateway.policies import FallbackPolicy, RetryPolicy, RoutingPreference, TimeoutPolicy
 from llm_gateway.pricing import Cost
 from llm_gateway.usage import TokenUsage
 
 Role = Literal["system", "user", "assistant"]
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+Verbosity = Literal["low", "medium", "high"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,14 @@ class LLMRequest:
     temperature: float | None = None
     max_output_tokens: int | None = None
     reasoning_effort: ReasoningEffort | None = None
+    verbosity: Verbosity | None = None
+    """How much prose to spend on the answer, where the provider offers the dial.
+
+    Separate from ``max_output_tokens``: that truncates an answer already being
+    written, and pays for every token up to the cut. This asks for a shorter one.
+    """
+    routing: RoutingPreference = field(default_factory=RoutingPreference)
+    """Which upstream should serve the call, honoured only by an aggregator."""
     timeout_policy: TimeoutPolicy = field(default_factory=TimeoutPolicy)
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy.disabled)
     fallback_policy: FallbackPolicy = field(default_factory=FallbackPolicy.disabled)

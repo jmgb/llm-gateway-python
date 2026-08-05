@@ -8,7 +8,7 @@ tests possible without a network and without any extra installed.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -19,6 +19,7 @@ from llm_gateway import (
     Message,
     RateLimitedError,
     ResponseFormat,
+    RoutingPreference,
 )
 from llm_gateway.providers.assemblyai import AssemblyAIAdapter
 from llm_gateway.providers.gemini import GeminiAdapter
@@ -180,6 +181,46 @@ class TestOpenAIAdapter:
         )
 
         assert recorder.kwargs["reasoning"] == {"effort": effort}
+
+    @pytest.mark.parametrize("level", ("low", "medium", "high"))
+    async def test_it_forwards_each_verbosity_level(self, level: str) -> None:
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(verbosity=level), model="gpt-5.6-terra"
+        )
+
+        assert recorder.kwargs["text"] == {"verbosity": level}
+
+    async def test_verbosity_travels_alongside_a_structured_format(self) -> None:
+        """Both live under ``text``, so one must not overwrite the other."""
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(verbosity="low", response_format=ResponseFormat.JSON_OBJECT),
+            model="gpt-5.6-terra",
+        )
+
+        assert recorder.kwargs["text"]["verbosity"] == "low"
+        assert recorder.kwargs["text"]["format"] == {"type": "json_object"}
+
+    async def test_a_request_that_asks_for_no_verbosity_sends_no_text_block(self) -> None:
+        """The payload of a v0.10 request must not move because the field exists."""
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(_request(), model="gpt-5.6-terra")
+
+        assert "text" not in recorder.kwargs
+
+    async def test_a_model_outside_the_gpt_5_family_never_receives_verbosity(self) -> None:
+        """Only the families that document the option can be sent it."""
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(verbosity="low"), model="o3-mini"
+        )
+
+        assert "text" not in recorder.kwargs
 
 
 class TestGeminiAdapter:
@@ -364,6 +405,28 @@ class TestGroqAdapter:
 
         assert recorder.kwargs["reasoning_effort"] == "high"
 
+    async def test_a_fallback_carrying_options_this_provider_ignores_still_calls(self) -> None:
+        """A request written for OpenAI or OpenRouter must not break here.
+
+        Fallback hands the same request to a different adapter, so an option
+        this one has no field for is read by nobody rather than passed through.
+        """
+        recorder = Recorder(
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="x"), finish_reason=None)],
+                usage=None,
+            )
+        )
+
+        await GroqAdapter(self._client(recorder)).generate(
+            _request(verbosity="low", routing=RoutingPreference(order=("Groq",))),
+            model="openai/gpt-oss-120b",
+        )
+
+        assert "text" not in recorder.kwargs
+        assert "provider" not in recorder.kwargs
+        assert "verbosity" not in recorder.kwargs
+
 
 class TestOpenRouterAdapter:
     def _client(self, recorder: Recorder) -> Any:
@@ -414,6 +477,35 @@ class TestOpenRouterAdapter:
         )
 
         assert recorder.kwargs["response_format"] == {"type": "json_object"}
+
+    async def test_it_forwards_the_preferred_upstream_order(self) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(
+            _request(routing=RoutingPreference(order=("Groq", "SambaNova"))), model="x/y"
+        )
+
+        assert recorder.kwargs["provider"] == {"order": ["Groq", "SambaNova"]}
+
+    @pytest.mark.parametrize("goal", ("throughput", "price", "latency"))
+    async def test_it_forwards_what_the_route_should_optimise_for(
+        self, goal: Literal["throughput", "price", "latency"]
+    ) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(
+            _request(routing=RoutingPreference(optimise_for=goal)), model="x/y"
+        )
+
+        assert recorder.kwargs["provider"] == {"sort": goal}
+
+    async def test_a_request_that_states_no_preference_routes_by_the_default(self) -> None:
+        """Sending an empty preference would override the aggregator's own choice."""
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(_request(), model="x/y")
+
+        assert "provider" not in recorder.kwargs
 
     async def test_it_reports_the_model_that_actually_served_the_call(self) -> None:
         """`openrouter/auto` picks a model, so the reply names a different one."""
@@ -474,12 +566,21 @@ class TestCapabilities:
         assert GroqAdapter(SimpleNamespace()).capabilities.reasoning_effort is True
         assert GroqAdapter(SimpleNamespace()).capabilities.audio_transcription is True
         assert AssemblyAIAdapter(SimpleNamespace()).capabilities.audio_transcription is True
+        assert OpenAIAdapter(SimpleNamespace()).capabilities.verbosity is True
+
+    def test_only_an_aggregator_routes_between_upstream_providers(self) -> None:
+        """Routing is a choice a single-provider adapter has nothing to make."""
+        assert OpenRouterAdapter(SimpleNamespace()).capabilities.upstream_routing is True
+        assert OpenAIAdapter(SimpleNamespace()).capabilities.upstream_routing is False
+        assert GroqAdapter(SimpleNamespace()).capabilities.upstream_routing is False
+        assert GeminiAdapter(SimpleNamespace()).capabilities.upstream_routing is False
 
     def test_an_aggregator_does_not_promise_what_its_models_may_not_support(self) -> None:
         capabilities = OpenRouterAdapter(SimpleNamespace()).capabilities
 
         assert capabilities.structured_outputs is False
         assert capabilities.json_mode is True
+        assert capabilities.verbosity is False
 
     def test_adapters_have_stable_names(self) -> None:
         assert OpenAIAdapter(SimpleNamespace()).name == "openai"

@@ -20,6 +20,7 @@ from typing import Any
 
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
+from llm_gateway.policies import RoutingPreference
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.schema_prompt import system_prompt_for
@@ -38,6 +39,11 @@ CAPABILITIES = ProviderCapabilities(
     remote_files=False,
     audio_transcription=False,
     reasoning_effort=False,
+    verbosity=False,
+    # The one capability an aggregator has and a single-provider adapter does
+    # not: the same model id is served by several upstreams, and which one
+    # answers changes throughput, price and availability.
+    upstream_routing=True,
     conversation_history=True,
     reports_token_usage=True,
 )
@@ -62,6 +68,8 @@ class OpenRouterAdapter:
             kwargs["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             kwargs["max_tokens"] = request.max_output_tokens
+        if request.routing.stated:
+            kwargs["provider"] = _provider_routing(request.routing)
         if request.response_format in (ResponseFormat.JSON_OBJECT, ResponseFormat.JSON_SCHEMA):
             # Schema enforcement depends on the model behind the route, so the
             # most this provider can honestly ask for is JSON. The gateway
@@ -96,6 +104,21 @@ class OpenRouterAdapter:
             messages.append({"role": "system", "content": system_prompt})
         messages.extend({"role": m.role, "content": m.content} for m in request.messages)
         return messages
+
+
+def _provider_routing(preference: RoutingPreference) -> dict[str, Any]:
+    """Only the halves the caller stated.
+
+    An empty ``order`` or a null ``sort`` is not the same instruction as an
+    absent one: OpenRouter reads what it is sent, so a blank half would narrow
+    the routing the caller left open.
+    """
+    routing: dict[str, Any] = {}
+    if preference.order:
+        routing["order"] = list(preference.order)
+    if preference.optimise_for is not None:
+        routing["sort"] = preference.optimise_for
+    return routing
 
 
 def _first_choice(raw: Any) -> Any:

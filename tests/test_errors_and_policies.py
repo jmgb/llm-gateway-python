@@ -12,6 +12,7 @@ from llm_gateway import (
     ProviderNotInstalled,
     RateLimitedError,
     RetryPolicy,
+    RoutingPreference,
     ServiceUnavailableError,
     TimeoutPolicy,
     UnknownModelError,
@@ -91,6 +92,24 @@ class TestFallbackPolicy:
         policy = FallbackPolicy.models_in_order("b", "c")
 
         assert policy.models == ("b", "c")
+
+
+class TestRoutingPreference:
+    def test_stating_nothing_is_the_default_so_the_provider_keeps_its_own_choice(
+        self,
+    ) -> None:
+        preference = RoutingPreference()
+
+        assert preference.stated is False
+
+    def test_either_half_of_the_preference_is_enough_to_state_one(self) -> None:
+        assert RoutingPreference(order=("Groq",)).stated is True
+        assert RoutingPreference(optimise_for="price").stated is True
+
+    def test_a_blank_upstream_name_is_rejected(self) -> None:
+        """An empty name routes to nothing, and the provider would not say so."""
+        with pytest.raises(ValueError, match="non-empty"):
+            RoutingPreference(order=("Groq", " "))
 
 
 class TestTimeoutPolicy:

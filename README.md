@@ -334,6 +334,30 @@ GPT-OSS support `low`, `medium`, and `high`. If a fallback cannot honour the
 requested effort, the gateway uses `medium` when available and otherwise omits
 the reasoning option.
 
+`LLMRequest.verbosity` (`low`, `medium`, `high`) asks for a shorter or longer
+answer, which is not what `max_output_tokens` does: that one truncates an answer
+already being written and pays for every token up to the cut. OpenAI declares
+`verbosity=True` and sends it for the `gpt-5` families; an adapter without the
+capability has no field for it, so a fallback that inherits the option is
+neither charged for it nor broken by it.
+
+`LLMRequest.routing` states which upstream should serve the call. Only an
+aggregator has that choice, so OpenRouter is the one adapter declaring
+`upstream_routing=True`:
+
+```python
+from llm_gateway import LLMRequest, RoutingPreference
+
+LLMRequest(
+    model="google/gemini-3.6-flash",
+    routing=RoutingPreference(order=("Groq", "SambaNova"), optimise_for="throughput"),
+)
+```
+
+Stating nothing is the default, and it is not the same as stating an empty
+preference: a blank instruction would override the aggregator's own routing, so
+only the halves a caller filled in are sent.
+
 `[openrouter]` installs the `openai` SDK, because OpenRouter speaks the OpenAI
 wire format and ships none of its own. That is a fact about the transport: the
 adapter, the declared capabilities and the prices are OpenRouter's.

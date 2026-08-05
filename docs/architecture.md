@@ -171,6 +171,15 @@ offending option is dropped. What the model accepts is declared in the
 catalogue (`ModelInfo.reasoning_efforts`, `ModelInfo.supports_temperature`),
 never inferred from the id.
 
+An option only one provider can honour needs no catalogue entry, because it is
+already unreachable elsewhere: `verbosity` and `routing` are read by the
+adapters that declare the matching capability and by no other, so an adapter
+without the field cannot forward what it never looked at. Adapters do not pass
+unknown request fields through — that is the property this relies on, and it is
+also why the request contract has no free-form provider dictionary: a
+passthrough would carry whatever a caller put in it straight to an API, past
+every capability declaration in the package.
+
 ## Error classification without SDK imports
 
 `providers/error_mapping.py` classifies by HTTP status first and class name

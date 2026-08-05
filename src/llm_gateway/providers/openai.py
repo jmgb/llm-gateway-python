@@ -38,9 +38,19 @@ CAPABILITIES = ProviderCapabilities(
     remote_files=True,
     audio_transcription=True,
     reasoning_effort=True,
+    verbosity=True,
+    upstream_routing=False,
     conversation_history=True,
     reports_token_usage=True,
 )
+
+VERBOSITY_MODEL_PREFIXES = ("gpt-5",)
+"""Families that document the dial.
+
+Sending it to a model that predates it is a 400 for the whole call, and a
+fallback inherits the request that asked for it — so the gate is here as well
+as in the catalogue, the same arrangement reasoning effort already uses.
+"""
 
 
 class OpenAIAdapter:
@@ -107,21 +117,26 @@ class OpenAIAdapter:
         if request.reasoning_effort is not None:
             kwargs["reasoning"] = {"effort": request.reasoning_effort}
 
+        # Format and verbosity share one field, so they are collected before it
+        # is set: assigning either on its own would discard the other.
+        text: dict[str, Any] = {}
         if request.response_format is ResponseFormat.JSON_OBJECT:
-            kwargs["text"] = {"format": {"type": "json_object"}}
+            text["format"] = {"type": "json_object"}
         elif request.response_format is ResponseFormat.JSON_SCHEMA:
             schema = request.response_schema
             assert schema is not None  # guaranteed by LLMRequest validation
-            kwargs["text"] = {
-                "format": {
-                    "type": "json_schema",
-                    "name": schema.__name__,
-                    # Pydantic's schema is not the subset strict mode accepts;
-                    # sending it unchanged is a 400 on every structured call.
-                    "schema": strict_json_schema(schema),
-                    "strict": True,
-                }
+            text["format"] = {
+                "type": "json_schema",
+                "name": schema.__name__,
+                # Pydantic's schema is not the subset strict mode accepts;
+                # sending it unchanged is a 400 on every structured call.
+                "schema": strict_json_schema(schema),
+                "strict": True,
             }
+        if request.verbosity is not None and model.startswith(VERBOSITY_MODEL_PREFIXES):
+            text["verbosity"] = request.verbosity
+        if text:
+            kwargs["text"] = text
         return kwargs
 
     def _build_input(self, request: LLMRequest) -> list[dict[str, Any]]:

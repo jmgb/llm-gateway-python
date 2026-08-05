@@ -35,6 +35,30 @@ consumer pins an immutable tag and upgrades through its own pull request.
   `UNAVAILABLE` rather than zero), plus a `modality` field on `ModelInfo`.
 - Live tests for real image and video generation (`tests/live/test_media_live.py`),
   deselected by default like every other live test.
+- **`LLMRequest.verbosity`**, asking for a shorter or longer answer where the
+  provider offers the dial. OpenAI declares `verbosity=True` and sends it for
+  the `gpt-5` families, alongside any requested response format rather than
+  instead of it. It is not `max_output_tokens`, which truncates an answer
+  already being written and pays for every token up to the cut.
+
+  Two consumers were keeping the option out of this package: their calls set
+  `verbosity="low"` on every OpenAI request, so routing one through the gateway
+  silently bought longer answers at the output rate. Both had to exclude
+  OpenAI from the neutral path to avoid it.
+
+- **`LLMRequest.routing`** and `RoutingPreference(order=..., optimise_for=...)`,
+  stating which upstream should serve the call. Only an aggregator has that
+  choice, so OpenRouter is the one adapter declaring `upstream_routing=True`.
+  Stating nothing is the default and is not the same as stating an empty
+  preference: only the halves a caller filled in are sent, because a blank
+  instruction would override the aggregator's own routing.
+
+  Modelled as a typed preference rather than a provider dictionary on purpose.
+  A passthrough field would carry anything a caller put in it straight to the
+  API, past every capability the package declares.
+
+- `ProviderCapabilities.verbosity` and `ProviderCapabilities.upstream_routing`,
+  both defaulting to `False`, so an adapter promises neither by silence.
 
 ### Changed
 

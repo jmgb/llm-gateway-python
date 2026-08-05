@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from llm_gateway.errors import LLMGatewayError
 
@@ -111,6 +111,36 @@ class FallbackPolicy:
     @property
     def enabled(self) -> bool:
         return bool(self.models)
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingPreference:
+    """Which upstream serves the call, for a provider that has a choice.
+
+    Only an aggregator does: it publishes one model id served by several
+    upstreams that differ in throughput, price and availability. Expressing
+    that as a neutral preference rather than a provider-shaped dictionary is
+    what keeps a passthrough — and every payload it could smuggle — out of the
+    request contract.
+
+    Saying nothing is the default, because an empty preference sent anyway
+    would override the aggregator's own routing with a blank instruction.
+    """
+
+    order: tuple[str, ...] = ()
+    """Upstream names, most preferred first. Provider-defined strings."""
+
+    optimise_for: Literal["throughput", "price", "latency"] | None = None
+    """What to rank the remaining candidates by."""
+
+    def __post_init__(self) -> None:
+        if any(not name.strip() for name in self.order):
+            raise ValueError("every upstream name must be non-empty")
+
+    @property
+    def stated(self) -> bool:
+        """True when the caller expressed a preference at all."""
+        return bool(self.order) or self.optimise_for is not None
 
 
 @dataclass(frozen=True, slots=True)

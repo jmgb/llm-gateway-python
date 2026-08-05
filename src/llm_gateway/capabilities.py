@@ -29,6 +29,9 @@ class ProviderCapabilities:
     """The same split for video: a text-to-video model cannot animate a first
     frame it was not built to accept."""
     reasoning_effort: bool = False
+    verbosity: bool = False
+    upstream_routing: bool = False
+    """True only for an aggregator, which is the only kind with a route to pick."""
     conversation_history: bool = True
     reports_token_usage: bool = True
 

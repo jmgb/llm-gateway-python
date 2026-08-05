@@ -33,6 +33,7 @@ from llm_gateway.contracts import (
     ReasoningEffort,
     ResponseFormat,
     Role,
+    Verbosity,
 )
 from llm_gateway.errors import (
     AllAttemptsFailed,
@@ -77,7 +78,7 @@ from llm_gateway.models import (
     models_by_provider,
     resolve_provider,
 )
-from llm_gateway.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
+from llm_gateway.policies import FallbackPolicy, RetryPolicy, RoutingPreference, TimeoutPolicy
 from llm_gateway.ports import (
     AlertSink,
     AudioUsageRecord,
@@ -207,6 +208,7 @@ __all__ = [
     "ResponseFormat",
     "RetryPolicy",
     "Role",
+    "RoutingPreference",
     "SchemaValidationError",
     "ServiceUnavailableError",
     "StaticAudioPriceCatalog",
@@ -220,6 +222,7 @@ __all__ = [
     "UnknownModelError",
     "UsageRecord",
     "UsageSink",
+    "Verbosity",
     "VideoAttempt",
     "VideoCost",
     "VideoExecution",
