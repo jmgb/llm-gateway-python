@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-08-12.2"
+CATALOG_VERSION = "2026-08-12.4"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -504,7 +504,24 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "replicate",
         "0",
         "0",
-        notes="community model billed by GPU time, so no per-image rate is published",
+        notes="image generation; USD 5 per thousand output images, so 0.005 each. "
+        "Replicate used to bill this one by GPU time and published no rate at all",
+        supports_temperature=False,
+        pricing_unit="images",
+        modality="image",
+        image_price="0.005",
+    ),
+    _m(
+        "prunaai/z-image-turbo",
+        "replicate",
+        "0",
+        "0",
+        notes="image generation, no safety checker of its own. Billed per output "
+        "megapixel and not per image — 0.005 per megapixel at the 1MP tier, "
+        "rising to 0.02 at 4MP — and ImageUsage counts images, not pixels, so no "
+        "rate is catalogued and cost reports UNAVAILABLE. The adapter sends no "
+        "dimensions, so Replicate's 1024x1024 default applies: about USD 0.0052 "
+        "an image, which an ImagePriceCatalog can state as fact once measured",
         supports_temperature=False,
         pricing_unit="images",
         modality="image",
@@ -577,6 +594,19 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         pricing_unit="images",
         modality="image",
         image_price="0.012",
+    ),
+    _m(
+        "wavespeed-ai/chroma",
+        "wavespeed",
+        "0",
+        "0",
+        notes="image generation; USD 0.015 per image, flat. Unfiltered by "
+        "design, which is a property of the weights and not a licence: the "
+        "provider's own safety checker and terms still apply",
+        supports_temperature=False,
+        pricing_unit="images",
+        modality="image",
+        image_price="0.015",
     ),
 )
 

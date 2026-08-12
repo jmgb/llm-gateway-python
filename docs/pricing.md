@@ -172,14 +172,25 @@ which one each model uses rather than picking a single fiction:
 | `gemini-3-pro-image` | Gemini | tokens | `$2` input / `$120` image output per 1M tokens |
 | `black-forest-labs/flux-kontext-pro` | Replicate | per image | `$0.04` |
 | `wavespeed-ai/hidream-i1-dev` | WaveSpeed | per image | `$0.012` |
-| `prunaai/p-image`, `bytedance/seedream-4` | Replicate | per image | **not published** |
+| `wavespeed-ai/chroma` | WaveSpeed | per image | `$0.015` |
+| `prunaai/p-image` | Replicate | per image | `$0.005` |
+| `bytedance/seedream-4` | Replicate | per image | **not published** |
+| `prunaai/z-image-turbo` | Replicate | per megapixel | **not expressible here** |
 
 `StaticImagePriceCatalog` reads the model's unit, never the operation's: a
 token-billed model is priced from `ImageUsage.tokens`, a per-image model from
 `ImageUsage.images`. A model with no published rate is left out of the built-in
-table, so its cost is `UNAVAILABLE` — Replicate bills community models by GPU
-second, and a fixed per-image number for them would be a guess presented as a
-fact. Applications that know their own figures inject an `ImagePriceCatalog`.
+table, so its cost is `UNAVAILABLE` — and a fixed per-image number invented for
+it would be a guess presented as a fact. Applications that know their own
+figures inject an `ImagePriceCatalog`.
+
+`prunaai/z-image-turbo` is left out for a different reason: Replicate publishes
+a rate, but per **output megapixel** — `$0.005` at the 1MP tier, up to `$0.02`
+at 4MP — and `ImageUsage` counts images, not pixels. Any per-image figure would
+be an assumption about output size that could be four times wrong. What is
+known: the adapter sends no dimensions, so the model's own 1024×1024 default
+applies, which puts a run at roughly `$0.0052`. That belongs in a consumer's
+own catalogue, measured, not in this table as a guess.
 
 Gemini's image-output token rate is deliberately separate from its text-output
 rate. Treating the two as one would understate an image invoice by up to 20×.

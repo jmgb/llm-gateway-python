@@ -1,8 +1,9 @@
 """Real image and video generation, end to end, against three providers.
 
 Opt-in because it spends provider credits: roughly five cents for the Gemini
-image, USD 0.20 for a five-second 480p clip on MiniMax H3, and an unpublished
-amount for the Kling clip, which Replicate bills by GPU time.
+image, USD 0.015 for the Chroma one, USD 0.20 for a five-second 480p clip on
+MiniMax H3, and an unpublished amount for the Kling clip, which Replicate bills
+by GPU time.
 
     uv sync --extra gemini --extra wavespeed --extra replicate
     GEMINI_API_KEY=... WAVESPEED_API_KEY=... REPLICATE_API_TOKEN=... \
@@ -20,7 +21,9 @@ two shapes video comes in:
   the poll loop lives in the test, which is where a real application keeps it.
 
 Running both on one frame is the point: the clips are comparable because only
-the model changed.
+the model changed. `wavespeed-ai/chroma` stands outside that chain: it answers
+with a hosted URL rather than bytes, so there is no frame to hand on, and what
+it covers is the per-image half of image pricing.
 
 Every clip here is generated at the **lowest resolution its model offers** —
 480p on MiniMax H3, 720p on Kling. That is the package's default and it is also
@@ -43,6 +46,7 @@ import tempfile
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -85,6 +89,13 @@ VIDEO_PROMPT = (
     "She leaps onto the gazelle, clamps her jaws hard on its throat and brings "
     "it down in a cloud of dust. Handheld wildlife documentary camera tracking "
     "the chase, natural savanna light."
+)
+
+CHROMA_MODEL = "wavespeed-ai/chroma"
+CHROMA_PROMPT = (
+    "A lone wolf standing on a rocky ridge at dusk, thick winter coat, breath "
+    "visible in the cold air, storm clouds breaking behind it. Photorealistic "
+    "wildlife photography, rim light along the fur, 300mm telephoto lens."
 )
 
 _IMAGE_FILENAME = "live_lion.png"
@@ -140,6 +151,46 @@ async def test_a_real_lion_image_is_generated_and_priced() -> None:
         f"image: model={result.execution.model_used} bytes={len(image.data)} "
         f"cost=${result.cost.amount_usd} saved={destination}"
     )
+
+
+async def test_chroma_returns_a_hosted_image_priced_at_its_flat_rate() -> None:
+    """The one image model here billed per image rather than per token.
+
+    It is outside the lion chain on purpose: WaveSpeed answers with a URL, not
+    bytes, so there is nothing for the video tests to animate — this package
+    does not download or re-host what a provider returns. What it proves is the
+    other half of image pricing: `usage.images` times a flat published rate,
+    ACTUAL rather than ESTIMATED because nothing about the amount is inferred.
+
+    Chroma is also the unfiltered model in the catalogue. Nothing here relies
+    on that, and the prompt is deliberately as tame as the rest of the suite: a
+    test that rerun by a human produces something they did not expect is a bad
+    test, whatever the model allows.
+    """
+    key = os.environ.get("WAVESPEED_API_KEY")
+    if not key:
+        pytest.skip("WAVESPEED_API_KEY is not set")
+    try:
+        gateway = _wavespeed_gateway(key)
+    except ProviderNotInstalled as absent:
+        pytest.skip(str(absent))
+
+    result = await gateway.generate_image(
+        ImageRequest(
+            model=CHROMA_MODEL,
+            prompt=CHROMA_PROMPT,
+            source="live-media-integration",
+            timeout_policy=TimeoutPolicy(total_seconds=300.0),
+        )
+    )
+
+    image = result.images[0]
+    assert image.url, "WaveSpeed returned no image URL"
+    assert result.usage.images == 1
+    assert result.cost.amount_usd == Decimal("0.015")
+    assert result.cost.measurement is CostMeasurement.ACTUAL
+    assert result.execution.provider == "wavespeed"
+    print(f"chroma image: cost=${result.cost.amount_usd} url={image.url}")
 
 
 async def test_the_real_lion_image_is_animated_into_a_hunt() -> None:

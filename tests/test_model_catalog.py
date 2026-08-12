@@ -84,6 +84,39 @@ class TestIdentity:
         assert info.provider == "wavespeed"
         assert info.image_usd_per_image == Decimal("0.012")
 
+    def test_p_image_now_carries_the_rate_replicate_publishes(self) -> None:
+        """It was unpriced while Replicate billed it by GPU time; now it is not."""
+        info = lookup_model("prunaai/p-image")
+
+        assert info is not None
+        assert info.image_usd_per_image == Decimal("0.005")
+
+    def test_z_image_turbo_is_catalogued_without_a_rate_it_cannot_apply(self) -> None:
+        """Replicate bills it per output megapixel, and ImageUsage counts images.
+
+        A per-image figure here would mean assuming the output size, and the
+        model spans 0.005 per megapixel to 0.02 — a guess that could be four
+        times wrong in either direction. Routing does not need a price, so the
+        model is reachable and its cost says UNAVAILABLE until a consumer
+        states its own.
+        """
+        info = lookup_model("prunaai/z-image-turbo")
+
+        assert info is not None
+        assert info.provider == "replicate"
+        assert info.modality == "image"
+        assert info.image_rate is None
+
+    def test_chroma_is_priced_per_image_at_its_published_flat_rate(self) -> None:
+        """Flat, so unlike HiDream the amount does not move with output size."""
+        info = lookup_model("wavespeed-ai/chroma")
+
+        assert info is not None
+        assert info.provider == "wavespeed"
+        assert info.modality == "image"
+        assert info.pricing_unit == "images"
+        assert info.image_usd_per_image == Decimal("0.015")
+
     def test_current_openai_audio_models_use_their_current_ids(self) -> None:
         expected = {
             "gpt-realtime-2.1",
@@ -386,8 +419,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-12.2"
-    PRICE_FINGERPRINT = "81d44084a8490f845d6c24cc6404dbc6c7f41fd7bf1563fe078108c57dfe1c96"
+    PRICED_AT_VERSION = "2026-08-12.4"
+    PRICE_FINGERPRINT = "b43a791ef76684e6d0705f4bf325a2cfdfbf856c1fe013c1e039dd81478516f1"
 
     @staticmethod
     def _fingerprint() -> str:

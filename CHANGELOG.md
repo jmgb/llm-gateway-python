@@ -9,7 +9,32 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- `prunaai/z-image-turbo` is catalogued as a Replicate image model, and
+  deliberately without a rate. Replicate bills it per **output megapixel** —
+  `$0.005` at the 1MP tier, `$0.02` at 4MP — while `ImageUsage` counts images,
+  so any per-image figure would be an assumption about output size that could
+  be four times wrong. Routing needs no price: the model is reachable, and its
+  cost reports `UNAVAILABLE` until a consumer supplies its own measured
+  `ImagePriceCatalog`. For reference, the adapter sends no dimensions, so the
+  model's 1024×1024 default applies — about `$0.0052` a run.
+
+- `wavespeed-ai/chroma` is catalogued as an image model at `$0.015` per image,
+  flat — unlike HiDream, the amount does not move with output size. It is the
+  unfiltered model of the catalogue, which is a property of the weights and
+  changes nothing about the request this package builds: WaveSpeed's own
+  safety checker is an input the adapter does not send, so it stays at
+  whatever the provider defaults to. A live test covers it end to end, at
+  1.5 cents a run.
+
 ### Fixed
+
+- `prunaai/p-image` is priced at last: `$5` per thousand output images, so
+  `$0.005` each. It entered the catalogue while Replicate billed it by GPU
+  time, when no request-shaped figure existed, and every image it generated
+  has reported `UNAVAILABLE` since. Replicate now publishes a flat per-image
+  rate, and the catalogue carries it.
 
 - `google/gemini-3.1-flash-image` on OpenRouter priced its images at the text
   output rate. OpenRouter publishes both figures side by side — `completion`
