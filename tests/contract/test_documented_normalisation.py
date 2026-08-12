@@ -88,7 +88,7 @@ class TestTheDocumentedDefaultResolution:
         "wavespeed-ai/minimax-h3/image-to-video": "480p",
         "wan-video/wan-2.2-5b-fast": "480p",
         "kwaivgi/kling-v3-video": "720p",
-        "bytedance/seedance-2.0": "480p",
+        "bytedance/seedance-2.5": "480p",
     }
 
     def test_every_video_model_the_docs_promise_a_floor_for_has_one(self) -> None:

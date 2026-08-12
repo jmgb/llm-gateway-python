@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
@@ -663,7 +664,7 @@ class TestReplicateVideoPolling:
 
 
 KLING = "kwaivgi/kling-v3-video"
-SEEDANCE = "bytedance/seedance-2.0"
+SEEDANCE = "bytedance/seedance-2.5"
 
 
 class TestReplicateVideoModelShapes:
@@ -784,18 +785,36 @@ class TestReplicateVideoModelShapes:
 
 
 class TestTheNewVideoModelsAreCatalogued:
-    @pytest.mark.parametrize("model", [KLING, SEEDANCE])
-    def test_they_are_video_models_priced_by_nothing_this_package_verified(
-        self, model: str
-    ) -> None:
+    def test_kling_is_a_video_model_priced_by_nothing_this_package_verified(self) -> None:
         from llm_gateway import lookup_model
 
-        info = lookup_model(model)
+        info = lookup_model(KLING)
 
         assert info is not None
         assert info.provider == "replicate"
         assert info.modality == "video"
         assert info.video_rate is None
+
+    def test_seedance_carries_the_published_rate_of_each_tier(self) -> None:
+        """Replicate publishes a per-second rate for 2.5, so cost is computable.
+
+        The dearer ``video_in`` variant is deliberately absent: a reference
+        video costs roughly four times as much, and no field on
+        ``VideoRequest`` can send one, so its rate would price a call this
+        package cannot make.
+        """
+        from llm_gateway import lookup_model
+
+        info = lookup_model(SEEDANCE)
+
+        assert info is not None
+        assert info.provider == "replicate"
+        assert info.modality == "video"
+        assert info.video_rate is not None
+        assert dict(info.video_rate.usd_per_second_by_resolution) == {
+            "480p": Decimal("0.1028"),
+            "720p": Decimal("0.2312"),
+        }
 
 
 class TestTheDefaultResolutionIsTheCheapestEachModelOffers:
@@ -829,7 +848,7 @@ class TestTheDefaultResolutionIsTheCheapestEachModelOffers:
         [
             (WAN, "resolution", "720p", "720p"),
             (KLING, "mode", "4k", "4k"),
-            (SEEDANCE, "resolution", "1080p", "1080p"),
+            (SEEDANCE, "resolution", "720p", "720p"),
         ],
     )
     async def test_a_stated_resolution_still_wins(

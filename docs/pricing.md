@@ -194,12 +194,17 @@ fallback pricing.
 
 Video is billed per second, and the rate depends on the resolution:
 
-| Model | Provider | 480p | 768p |
-|---|---|---:|---:|
-| `wavespeed-ai/minimax-h3/image-to-video` | WaveSpeed | `$0.04` / second | `$0.08` / second |
-| `wan-video/wan-2.2-5b-fast` | Replicate | *no published rate* | *no published rate* |
-| `kwaivgi/kling-v3-video` | Replicate | *no verified rate* | *no verified rate* |
-| `bytedance/seedance-2.0` | Replicate | *no verified rate* | *no verified rate* |
+| Model | Provider | Rate per second |
+|---|---|---|
+| `wavespeed-ai/minimax-h3/image-to-video` | WaveSpeed | `$0.04` at 480p, `$0.08` at 768p |
+| `bytedance/seedance-2.5` | Replicate | `$0.1028` at 480p, `$0.2312` at 720p |
+| `wan-video/wan-2.2-5b-fast` | Replicate | *no published rate* |
+| `kwaivgi/kling-v3-video` | Replicate | *no verified rate* |
+
+Seedance 2.5 publishes two rate cards, and only the cheaper one is catalogued:
+passing a reference video costs about four times as much, and `VideoRequest`
+has no field that sends one. If that ever changes, the dearer card has to
+arrive with it, or every such clip is billed at a quarter of its price.
 
 `StaticVideoPriceCatalog` prices `VideoUsage.seconds` at the rate for
 `VideoUsage.resolution`. A resolution the table does not know yields
@@ -219,7 +224,7 @@ offers, and anything above it has to be named:
 | `wavespeed-ai/minimax-h3/image-to-video` | unset | `480p` |
 | `wan-video/wan-2.2-5b-fast` | `720p` | `480p` |
 | `kwaivgi/kling-v3-video` | `pro` (1080p) | `standard` (720p) |
-| `bytedance/seedance-2.0` | `720p` | `480p` |
+| `bytedance/seedance-2.5` | `720p` | `480p` |
 
 Every one of those providers defaults to something dearer than its floor, so
 the request that says nothing is exactly the one that would quietly cost the

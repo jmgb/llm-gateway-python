@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-08-06.1"
+CATALOG_VERSION = "2026-08-12.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -533,15 +533,18 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         modality="video",
     ),
     _m(
-        "bytedance/seedance-2.0",
+        "bytedance/seedance-2.5",
         "replicate",
         "0",
         "0",
-        notes="3-15s clips at 480p-4K. No per-second rate verified against the "
-        "API, so cost reports UNAVAILABLE rather than a guess",
+        notes="clips up to 30s at 480p or 720p; USD 0.1028 per second at 480p, "
+        "0.2312 at 720p. Those are the rates for the variant this package can "
+        "reach: sending a reference video costs about four times as much, and "
+        "VideoRequest has no field that would send one",
         supports_temperature=False,
         pricing_unit="video_seconds",
         modality="video",
+        video_prices_by_resolution={"480p": "0.1028", "720p": "0.2312"},
     ),
     # ---- WaveSpeed ------------------------------------------------------
     _m(

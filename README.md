@@ -381,7 +381,7 @@ one from its published input schema rather than a shared guess:
 |---|---|---|---|---|
 | `wan-video/wan-2.2-5b-fast` | `image` | frames — `duration_seconds` refused | `480p`/`720p` | `480p` |
 | `kwaivgi/kling-v3-video` | `start_image` | 3–15 s | `720p`/`1080p`/`4k`, sent as `mode` | `standard` (720p) |
-| `bytedance/seedance-2.0` | `image` | 3–15 s | `480p`/`720p`/`1080p`/`4k` | `480p` |
+| `bytedance/seedance-2.5` | `image` | up to 30 s | `480p`/`720p` | `480p` |
 
 That last column is the cheapest tier of each, and it is deliberately not what
 Replicate would have picked — its own defaults are 720p, `pro` (1080p) and 720p
@@ -390,8 +390,9 @@ respectively.
 A resolution a model does not offer raises rather than falling back to its
 default: Replicate ignores keys it does not recognise, generates the default,
 and bills for it, so a silent drop is a clip nobody asked for on the invoice.
-None of the three has a per-second rate this package could verify, so their
-cost is `UNAVAILABLE` — pass a `VideoPriceCatalog` with your measured rates.
+Only Seedance 2.5 has a per-second rate this package could verify — `$0.1028`
+at 480p, `$0.2312` at 720p — so Wan and Kling report `UNAVAILABLE`; pass a
+`VideoPriceCatalog` with your measured rates for those.
 
 ## The guarantees
 

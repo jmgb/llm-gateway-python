@@ -108,9 +108,10 @@ _VIDEO_SHAPES = {
         resolutions={"720p": "standard", "1080p": "pro", "4k": "4k"},
         default_resolution="720p",
     ),
-    "bytedance/seedance-2.0": _VideoShape(
+    # 2.5 dropped the 1080p and 4K tiers its 2.0 predecessor offered.
+    "bytedance/seedance-2.5": _VideoShape(
         duration_field="duration",
-        resolutions={"480p": "480p", "720p": "720p", "1080p": "1080p", "4k": "4k"},
+        resolutions={"480p": "480p", "720p": "720p"},
         default_resolution="480p",
     ),
 }

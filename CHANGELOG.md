@@ -11,6 +11,22 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Changed
 
+- **Breaking:** `bytedance/seedance-2.0` is replaced by
+  `bytedance/seedance-2.5`. The old id is no longer catalogued and raises
+  `UnknownModelError`; callers move to the new one. Read from 2.5's published
+  input schema, three things differ: a clip may now run to 30 seconds instead
+  of 15, the `1080p` and `4k` tiers are gone — the model offers `480p` and
+  `720p` only, so asking for either of the dropped tiers now raises rather
+  than silently downgrading — and Replicate publishes a per-second rate, so
+  cost is computed instead of reported `UNAVAILABLE`: `$0.1028` at 480p and
+  `$0.2312` at 720p. Unset resolution still buys `480p`, the cheapest tier.
+
+  Only the rate card for the variant this package can reach is catalogued.
+  Sending a reference video costs roughly four times as much, and no field on
+  `VideoRequest` sends one; the day one does, the dearer card comes with it.
+
+  `CATALOG_VERSION` moves to `2026-08-12.1`.
+
 - The `openai`, `openrouter` and `all` extras now accept `openai>=2.51,<4`
   instead of capping below 3. The cap was resolver policy, not a compatibility
   finding: this package touches `AsyncOpenAI(api_key=..., base_url=...)` and

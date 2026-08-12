@@ -327,6 +327,10 @@
   | `kwaivgi/kling-v3-video` | `start_image` | `duration`, 3-15 s | `mode`: standard/pro/4k |
   | `bytedance/seedance-2.0` | `image` | `duration`, 3-15 s | `resolution`: 480p-4k |
 
+  Superseded for Seedance: the catalogue now carries `bytedance/seedance-2.5`,
+  which runs to 30 s, offers `480p`/`720p` only, and publishes a per-second
+  rate. This row records what 2.0 was.
+
   A resolution a model does not offer raises rather than falling back to the
   model's default, and a Replicate model this package has not verified receives
   only prompt and first frame. Both rules exist because Replicate ignores keys
