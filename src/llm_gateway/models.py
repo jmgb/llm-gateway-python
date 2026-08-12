@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-08-12.1"
+CATALOG_VERSION = "2026-08-12.2"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -429,7 +429,16 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("google/gemini-3-flash-preview", "openrouter", "0.50", "3.00", deprecated=True),
     _m("google/gemini-3-pro-preview", "openrouter", "2.00", "12.00", deprecated=True),
     _m("google/gemini-3.1-flash-lite-preview", "openrouter", "0.25", "1.50"),
-    _m("google/gemini-3.1-flash-image", "openrouter", "0.50", "3.00", modality="image"),
+    # OpenRouter resells Google's own rates, image tokens included: its
+    # `image_output` is 60.00/Mtok, while the 3.00 above is the text one.
+    _m(
+        "google/gemini-3.1-flash-image",
+        "openrouter",
+        "0.50",
+        "3.00",
+        modality="image",
+        image_output_price_per_mtok="60.00",
+    ),
     _m("google/gemini-3.1-pro-preview", "openrouter", "2.00", "12.00"),
     _m("google/gemini-3.5-flash", "openrouter", "1.50", "9.00"),
     _m("google/gemini-3.5-flash-lite", "openrouter", "0.30", "2.50"),

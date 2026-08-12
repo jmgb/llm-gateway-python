@@ -9,6 +9,22 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- `google/gemini-3.1-flash-image` on OpenRouter priced its images at the text
+  output rate. OpenRouter publishes both figures side by side — `completion`
+  at `$3.00` per Mtok and `image_output` at `$60.00` — and the entry carried
+  the first, so every image it valued came out at a twentieth of its cost.
+  Nothing in the result said so: an amount twenty times too low reads exactly
+  like an amount. The Gemini entry for the same model had `$60.00` all along,
+  which is what makes this an omission rather than a difference between the
+  two routes — OpenRouter resells Google's rates, image tokens included.
+
+  Amounts already recorded for that model under an earlier `CATALOG_VERSION`
+  stay wrong; this corrects what is priced from now on.
+  `TestCatalogueHygiene` now fails for any token-billed image model that
+  declares no image token rate, so the omission cannot recur silently.
+
 ### Changed
 
 - **Breaking:** `bytedance/seedance-2.0` is replaced by

@@ -328,6 +328,29 @@ class TestCatalogueHygiene:
         assert "gemini-3.5-flash-lite" in {m.id for m in gemini}
         assert all(m.provider == "gemini" for m in gemini)
 
+    def test_every_token_billed_image_model_declares_its_image_token_rate(self) -> None:
+        """The text output rate is not the image one, and it is twenty times off.
+
+        Both numbers are published per model, they sit next to each other, and
+        only one of them prices a generated image. A real case: the OpenRouter
+        entry for `google/gemini-3.1-flash-image` carried `3.00` — Google's text
+        rate — while the image tokens it actually bills cost `60.00`, so every
+        image it priced was valued at a twentieth of what it cost. The Gemini
+        entry for the very same model had the right figure all along.
+        """
+        missing = {
+            info.id
+            for info in MODEL_CATALOG.values()
+            if info.modality == "image"
+            and info.pricing_unit == "tokens"
+            and info.image_output_usd_per_mtok is None
+        }
+
+        assert missing == set(), (
+            f"image models billed by tokens with no image token rate, so their "
+            f"images are priced at the text rate: {missing}"
+        )
+
     def test_no_model_id_is_declared_twice(self) -> None:
         """A duplicate key silently discards one of the two prices.
 
@@ -363,8 +386,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-12.1"
-    PRICE_FINGERPRINT = "3bbb0cc1cb036355411897f6ba83412340b8af4a13abd604d6629b35cbe5d221"
+    PRICED_AT_VERSION = "2026-08-12.2"
+    PRICE_FINGERPRINT = "81d44084a8490f845d6c24cc6404dbc6c7f41fd7bf1563fe078108c57dfe1c96"
 
     @staticmethod
     def _fingerprint() -> str:
