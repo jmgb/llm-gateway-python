@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-08-12
+
 ### Fixed
 
 - `json_object` no longer depends on the caller's prompt happening to say
