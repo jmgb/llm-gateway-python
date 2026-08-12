@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=2.51,<3"]
+openai = ["openai>=2.51,<4"]
 gemini = ["google-genai>=2.16,<3"]
 groq = ["groq>=1.4,<2"]
 assemblyai = ["httpx>=0.27,<1"]
@@ -43,9 +43,9 @@ replicate = ["replicate>=1.0,<2"]
 wavespeed = ["httpx>=0.27,<1"]
 # OpenRouter ships no SDK: it speaks the OpenAI wire format. The extra exists
 # so that installing it is named after the provider a consumer actually wants.
-openrouter = ["openai>=2.51,<3"]
+openrouter = ["openai>=2.51,<4"]
 all = [
-    "openai>=2.51,<3",
+    "openai>=2.51,<4",
     "google-genai>=2.16,<3",
     "groq>=1.4,<2",
     "httpx>=0.27,<1",

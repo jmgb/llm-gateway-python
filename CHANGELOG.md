@@ -9,6 +9,16 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Changed
+
+- The `openai`, `openrouter` and `all` extras now accept `openai>=2.51,<4`
+  instead of capping below 3. The cap was resolver policy, not a compatibility
+  finding: this package touches `AsyncOpenAI(api_key=..., base_url=...)` and
+  the Responses and transcription calls, and nothing that a major bump is
+  likely to move. Holding the ceiling one major behind was what forced eight
+  consumers to wait on a release here before they could take an unrelated
+  upgrade of their own.
+
 ## [0.12.1] — 2026-08-12
 
 ### Fixed
