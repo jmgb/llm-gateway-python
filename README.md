@@ -387,6 +387,12 @@ That last column is the cheapest tier of each, and it is deliberately not what
 Replicate would have picked — its own defaults are 720p, `pro` (1080p) and 720p
 respectively.
 
+Seedance 2.5 also generates native audio — dialogue, sound effects and music —
+and does so by default, because that is the model's own default and nothing
+here overrides it: the option changes no price, so choosing for you would be
+this package legislating product, not accounting. A pipeline that lays its own
+voice-over should expect a soundtrack it did not ask for and discard it.
+
 A resolution a model does not offer raises rather than falling back to its
 default: Replicate ignores keys it does not recognise, generates the default,
 and bills for it, so a silent drop is a clip nobody asked for on the invoice.

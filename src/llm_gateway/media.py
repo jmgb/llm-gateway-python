@@ -160,6 +160,16 @@ class VideoRequest:
     image: ImageInput | None = None
     """The first frame. Present for image-to-video, absent for text-to-video."""
     duration_seconds: int | None = None
+    """Seconds of clip, and it must be a real number of them.
+
+    Seedance 2.5 spells "you decide the length" as ``duration=-1``, and this
+    package refuses to pass it on. Video is billed per second, so delegating
+    the length delegates the amount: on that model the difference between the
+    five-second default and the thirty-second ceiling is USD 0.51 against USD
+    3.08, unauthorised by a caller who only ever said "make it good". Length is
+    the second biggest lever on a video bill after resolution, and the rule is
+    the same for both — the expensive answer has to be asked for.
+    """
     resolution: str | None = None
     """Left unset, the adapter sends the **cheapest tier its model offers**.
 
