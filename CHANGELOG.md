@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-08-12
+
 ### Added
 
 - `prunaai/z-image-turbo` is catalogued as a Replicate image model, and
