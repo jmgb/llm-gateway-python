@@ -31,9 +31,17 @@ Provider-shaped code moved here. Product-shaped code stayed in the application.
 
 Those last two rows sit closer together than they look. An adapter declaring
 `structured_outputs=False` cannot bind the answer to a shape through any API
-field, and Groq will not even accept `json_object` unless the messages say
-"json". So the adapter appends to the system prompt — text this package sends
+field, so it appends the schema to the system prompt — text this package sends
 that the application did not write.
+
+The word "json" is a **separate** obligation, and conflating the two cost real
+money: Groq and OpenAI both reject `json_object` unless the messages say
+"json", and that has nothing to do with whether the provider can enforce a
+schema. OpenAI declares `structured_outputs=True`, so it was skipped by the
+rule written for the other case, and every `json_object` call whose prompt did
+not happen to mention JSON was a 400 answered by the fallback. Enforcement and
+preconditions are asked separately: `system_prompt_for(request,
+structured_outputs=...)`.
 
 That is not a prompt, and the distinction is what keeps the boundary intact: it
 carries no tone, no task framing and no examples, only the JSON Schema the

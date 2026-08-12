@@ -148,6 +148,53 @@ class TestOpenAIAdapter:
         assert "json" in rendered.lower()
         assert recorder.kwargs["text"] == {"format": {"type": "json_object"}}
 
+    async def test_json_mode_says_the_word_when_the_prompt_does_not(self) -> None:
+        """Whoever sets the format owes the word the provider requires.
+
+        OpenAI answers HTTP 400 to ``json_object`` when "json" appears nowhere
+        in the input, and a caller has no reason to know that. Leaving the word
+        to their prompt made every such call fail and be served by the fallback
+        instead — a correct answer, from the second model, at the second
+        model's price, with nothing in the result that looks wrong.
+        """
+        recorder = Recorder(SimpleNamespace(output_text="{}", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(
+                system_prompt="You summarise site visits.",
+                response_format=ResponseFormat.JSON_OBJECT,
+            ),
+            model="gpt-x",
+        )
+
+        rendered = " ".join(message["content"] for message in recorder.kwargs["input"])
+        assert "json" in rendered.lower(), (
+            "json_object without the word 'json' in the input is a 400 at OpenAI"
+        )
+        assert recorder.kwargs["text"] == {"format": {"type": "json_object"}}
+
+    async def test_json_mode_does_not_repeat_a_word_the_prompt_already_has(self) -> None:
+        recorder = Recorder(SimpleNamespace(output_text="{}", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(
+                system_prompt="Reply with json.",
+                response_format=ResponseFormat.JSON_OBJECT,
+            ),
+            model="gpt-x",
+        )
+
+        assert recorder.kwargs["input"][0]["content"] == "Reply with json."
+
+    async def test_text_format_leaves_the_prompt_alone(self) -> None:
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(system_prompt="You summarise site visits."), model="gpt-x"
+        )
+
+        assert recorder.kwargs["input"][0]["content"] == "You summarise site visits."
+
     async def test_a_request_without_a_system_prompt_sends_only_its_messages(self) -> None:
         recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
 

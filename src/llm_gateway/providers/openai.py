@@ -25,6 +25,7 @@ from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.errors import ConfigurationError
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
+from llm_gateway.providers.schema_prompt import system_prompt_for
 from llm_gateway.providers.strict_schema import strict_json_schema
 from llm_gateway.tools import FunctionTool, ProviderToolCall, RequiredTool, ToolChoice
 from llm_gateway.usage import TokenUsage
@@ -155,10 +156,17 @@ class OpenAIAdapter:
         input, and ``instructions`` is not part of the input. A system prompt
         that asks for JSON would therefore be invisible to that check. Sending
         it as a message also matches the arrangement Chat Completions used.
+
+        Placing the prompt where the check can see it is only half of the rule;
+        the word still has to be there. ``system_prompt_for`` adds it when the
+        caller's prompt does not, which is the same debt Groq and OpenRouter
+        already settle here. Structured outputs are declared, so the schema
+        itself is not repeated in the conversation.
         """
         messages: list[dict[str, Any]] = []
-        if request.system_prompt:
-            messages.append({"role": "system", "content": request.system_prompt})
+        system_prompt = system_prompt_for(request, structured_outputs=True)
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         messages.extend({"role": m.role, "content": m.content} for m in request.messages)
         if request.attachments:
             for message in reversed(messages):

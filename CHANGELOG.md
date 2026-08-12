@@ -9,6 +9,29 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Fixed
+
+- `json_object` no longer depends on the caller's prompt happening to say
+  "json" when the provider is OpenAI. The Responses API answers HTTP 400 —
+  *"Response input messages must contain the word 'json' in some form"* — and
+  the OpenAI adapter was the only one that did not settle that debt, though it
+  already carried the system prompt as a message so the check could see it.
+  Groq and OpenRouter have called `system_prompt_for` since it existed; OpenAI
+  now does too.
+
+  The failure was expensive precisely because it did not look like one. Every
+  such call was rejected, the fallback answered instead, and the caller got a
+  correct result from the second model at the second model's price plus the
+  latency of the rejected attempt. Nothing in the result said so.
+
+### Changed
+
+- `system_prompt_for` takes a keyword-only `structured_outputs` flag. An
+  adapter that binds the shape through an API field passes `True` and no longer
+  gets the schema repeated in the conversation; the `json_object` sentence is
+  still added, because that precondition is about the word being present, not
+  about enforcement. Default is `False`, so Groq and OpenRouter are unchanged.
+
 ## [0.12.0] — 2026-08-06
 
 ### Added

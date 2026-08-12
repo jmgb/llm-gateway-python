@@ -46,7 +46,7 @@ _SCHEMA_INSTRUCTION = (
 _JSON_MODE_INSTRUCTION = "Reply with a single JSON object and no other text."
 
 
-def system_prompt_for(request: LLMRequest) -> str | None:
+def system_prompt_for(request: LLMRequest, *, structured_outputs: bool = False) -> str | None:
     """The caller's system prompt, plus whatever the requested format needs.
 
     Three cases, and only the format decides which applies:
@@ -58,12 +58,18 @@ def system_prompt_for(request: LLMRequest) -> str | None:
     * ``JSON_SCHEMA`` — the schema itself, so a provider that cannot enforce
       one still tells the model which field names to use.
 
+    ``structured_outputs`` says the adapter binds the shape through an API
+    field of its own. Such a provider needs no schema in the conversation —
+    sending it again would pay for the same declaration twice — but the
+    precondition of ``json_object`` is not about enforcement and still
+    applies: the word has to be somewhere in the messages either way.
+
     A caller who already said "json" is left untouched: the requirement is met,
     and appending to a prompt that does not need it only adds noise the model
     has to reconcile with instructions of its own.
     """
     prompt = request.system_prompt
-    instruction = _instruction_for(request)
+    instruction = _instruction_for(request, structured_outputs=structured_outputs)
     if instruction is None:
         return prompt
     if prompt is None:
@@ -73,8 +79,10 @@ def system_prompt_for(request: LLMRequest) -> str | None:
     return f"{prompt}\n\n{instruction}"
 
 
-def _instruction_for(request: LLMRequest) -> str | None:
+def _instruction_for(request: LLMRequest, *, structured_outputs: bool) -> str | None:
     if request.response_format is ResponseFormat.JSON_SCHEMA:
+        if structured_outputs:
+            return None
         schema = request.response_schema
         assert schema is not None  # guaranteed by LLMRequest validation
         declaration = json.dumps(schema.model_json_schema(), ensure_ascii=False, sort_keys=True)
