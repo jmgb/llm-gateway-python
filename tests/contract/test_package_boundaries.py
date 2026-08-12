@@ -21,6 +21,7 @@ FORBIDDEN_TOP_LEVEL_IMPORTS = {
     "google",
     "anthropic",
     "httpx",
+    "httpx2",
     "requests",
 }
 

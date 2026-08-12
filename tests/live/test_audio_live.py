@@ -162,11 +162,11 @@ async def _provider_client_and_registry(
 async def _upload_to_assemblyai(api_key: str, audio_bytes: bytes) -> str:
     """Upload the fixture so the real AssemblyAI adapter can submit its URL."""
     try:
-        import httpx
+        import httpx2
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("assemblyai") from error
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx2.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             "https://api.assemblyai.com/v2/upload",
             headers={"Authorization": api_key, "Content-Type": "application/octet-stream"},

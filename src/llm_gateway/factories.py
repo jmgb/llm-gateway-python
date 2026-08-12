@@ -112,7 +112,7 @@ def create_assemblyai_client(*, api_key: str) -> Any:
     """Build the small REST client used by the AssemblyAI adapter."""
     _require_key(api_key)
     try:
-        __import__("httpx")
+        __import__("httpx2")
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("assemblyai") from error
     return AssemblyAIHttpClient(api_key=api_key)
@@ -135,7 +135,7 @@ def create_wavespeed_client(*, api_key: str) -> Any:
     """Build the small REST client used by the WaveSpeed adapter."""
     _require_key(api_key)
     try:
-        __import__("httpx")
+        __import__("httpx2")
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("wavespeed") from error
     return WaveSpeedHttpClient(api_key=api_key)

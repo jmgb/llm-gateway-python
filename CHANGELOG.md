@@ -9,6 +9,21 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Changed
+
+- The `assemblyai` and `wavespeed` extras now install `httpx2` instead of
+  `httpx`. Upstream `httpx` has published nothing since `0.28.1` (December
+  2024); Pydantic maintains the fork under the `httpx2` name, and that is where
+  security fixes for a library on the request path now land. `httpx2 2.0` is
+  `httpx 0.28.1` with the package renamed and no other public API change, so
+  the adapters are identical bar the import.
+
+  **This is breaking for consumers that install those extras.** A consumer with
+  `httpx` pinned for its own reasons keeps it — the two packages coexist — but
+  the extra no longer pulls it in, and `create_assemblyai_client` /
+  `create_wavespeed_client` now raise `ProviderNotInstalled` when only `httpx`
+  is present. Reinstall the extra rather than adding `httpx2` by hand.
+
 ## [0.13.0] — 2026-08-12
 
 ### Added

@@ -37,10 +37,10 @@ dependencies = [
 openai = ["openai>=2.51,<4"]
 gemini = ["google-genai>=2.16,<3"]
 groq = ["groq>=1.4,<2"]
-assemblyai = ["httpx>=0.27,<1"]
+assemblyai = ["httpx2>=2.10.0,<3"]
 replicate = ["replicate>=1.0,<2"]
-# WaveSpeed ships no SDK either: the adapter speaks its REST API over httpx.
-wavespeed = ["httpx>=0.27,<1"]
+# WaveSpeed ships no SDK either: the adapter speaks its REST API over httpx2.
+wavespeed = ["httpx2>=2.10.0,<3"]
 # OpenRouter ships no SDK: it speaks the OpenAI wire format. The extra exists
 # so that installing it is named after the provider a consumer actually wants.
 openrouter = ["openai>=2.51,<4"]
@@ -48,7 +48,7 @@ all = [
     "openai>=2.51,<4",
     "google-genai>=2.16,<3",
     "groq>=1.4,<2",
-    "httpx>=0.27,<1",
+    "httpx2>=2.10.0,<3",
     "replicate>=1.0,<2",
 ]
 
@@ -123,5 +123,5 @@ files = ["src", "tests", "scripts"]
 [[tool.mypy.overrides]]
 # Provider SDKs are optional extras. Type checking must pass with none of them
 # installed, which is exactly the environment CI runs in.
-module = ["google.*", "google.genai.*", "groq.*", "httpx.*", "openai.*", "replicate.*"]
+module = ["google.*", "google.genai.*", "groq.*", "httpx2.*", "openai.*", "replicate.*"]
 ignore_missing_imports = true

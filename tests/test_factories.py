@@ -45,7 +45,7 @@ def test_each_provider_names_its_own_extra(monkeypatch: pytest.MonkeyPatch) -> N
 def test_assemblyai_client_is_constructed_from_an_explicit_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "httpx", ModuleType("httpx"))
+    monkeypatch.setitem(sys.modules, "httpx2", ModuleType("httpx2"))
 
     client = create_assemblyai_client(api_key="assembly-key")
 
@@ -55,7 +55,7 @@ def test_assemblyai_client_is_constructed_from_an_explicit_key(
 def test_a_missing_assemblyai_transport_names_its_extra(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "httpx", None)
+    monkeypatch.setitem(sys.modules, "httpx2", None)
 
     with pytest.raises(ProviderNotInstalled, match=r"\[assemblyai\]"):
         create_assemblyai_client(api_key="unused")
@@ -76,7 +76,7 @@ def test_the_image_providers_name_their_own_extras(monkeypatch: pytest.MonkeyPat
     with pytest.raises(ProviderNotInstalled, match=r"\[replicate\]"):
         create_replicate_client(api_key="unused")
 
-    monkeypatch.setitem(sys.modules, "httpx", None)
+    monkeypatch.setitem(sys.modules, "httpx2", None)
     with pytest.raises(ProviderNotInstalled, match=r"\[wavespeed\]"):
         create_wavespeed_client(api_key="unused")
 
@@ -84,7 +84,7 @@ def test_the_image_providers_name_their_own_extras(monkeypatch: pytest.MonkeyPat
 def test_the_wavespeed_client_carries_the_key_as_a_bearer_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "httpx", ModuleType("httpx"))
+    monkeypatch.setitem(sys.modules, "httpx2", ModuleType("httpx2"))
 
     client = create_wavespeed_client(api_key="wave-key")
 

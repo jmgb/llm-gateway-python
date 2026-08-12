@@ -42,9 +42,9 @@ class AssemblyAIHttpClient:
     async def _request(
         self, method: str, path: str, *, json: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        import httpx
+        import httpx2
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx2.AsyncClient(timeout=120.0) as client:
             response = await client.request(
                 method,
                 f"{self._base_url}/{path.lstrip('/')}",
