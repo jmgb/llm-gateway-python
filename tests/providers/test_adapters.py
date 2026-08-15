@@ -357,7 +357,7 @@ class TestGeminiAdapter:
         recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
 
         await GeminiAdapter(self._client(recorder)).generate(
-            _request(reasoning_effort="medium"), model="gemini-3.6-flash"
+            _request(reasoning_effort="medium"), model="gemini-3.7-flash"
         )
 
         assert recorder.kwargs["config"]["thinking_config"] == {"thinking_level": "medium"}

@@ -11,6 +11,13 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [0.14.0] — 2026-08-15
 
+### Added
+
+- Gemini and OpenRouter catalogue entries for `gemini-3.7-flash` and
+  `google/gemini-3.7-flash`, priced at `0.75` input / `3.75` output USD per
+  MTok. The corresponding `3.6` entries remain available but are deprecated,
+  and `CATALOG_VERSION` moves to `2026-08-15.1`.
+
 ### Changed
 
 - The `assemblyai` and `wavespeed` extras now install `httpx2` instead of

@@ -184,6 +184,26 @@ class TestIdentity:
         for model_id, info in MODEL_CATALOG.items():
             assert info.id == model_id
 
+    def test_gemini_37_is_catalogued_direct_and_on_openrouter(self) -> None:
+        expected = {
+            "gemini-3.7-flash": "gemini",
+            "google/gemini-3.7-flash": "openrouter",
+        }
+
+        for model_id, provider in expected.items():
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.provider == provider
+            assert info.input_usd_per_mtok == Decimal("0.75")
+            assert info.output_usd_per_mtok == Decimal("3.75")
+            assert info.deprecated is False
+
+    def test_gemini_36_remains_catalogued_as_deprecated(self) -> None:
+        for model_id in ("gemini-3.6-flash", "google/gemini-3.6-flash"):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.deprecated is True
+
     def test_reasoning_efforts_are_declared_per_model(self) -> None:
         openai_expected = ("none", "low", "medium", "high", "xhigh", "max")
 
@@ -198,6 +218,7 @@ class TestIdentity:
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.6-flash",
+            "gemini-3.7-flash",
         ):
             info = lookup_model(model_id)
             assert info is not None
@@ -219,7 +240,7 @@ class TestIdentity:
 
 class TestProviderRouting:
     def test_a_catalogued_model_routes_by_its_declared_provider(self) -> None:
-        assert resolve_provider("gemini-3.6-flash") == "gemini"
+        assert resolve_provider("gemini-3.7-flash") == "gemini"
 
     def test_an_openai_prefixed_groq_model_is_not_mistaken_for_openai(self) -> None:
         """`openai/gpt-oss-120b` is served by Groq, despite the prefix."""
@@ -419,8 +440,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-12.4"
-    PRICE_FINGERPRINT = "b43a791ef76684e6d0705f4bf325a2cfdfbf856c1fe013c1e039dd81478516f1"
+    PRICED_AT_VERSION = "2026-08-15.1"
+    PRICE_FINGERPRINT = "7de4b3b272e732f4d9ea1633381858dae6161de925d6d6dca7b2a6a8906f3945"
 
     @staticmethod
     def _fingerprint() -> str:

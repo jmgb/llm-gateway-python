@@ -48,7 +48,7 @@ class TestRoutingUsesTheCatalogue:
             groq_client=SimpleNamespace(),
         )
 
-        assert registry.resolve("gemini-3.6-flash").name == "gemini"
+        assert registry.resolve("gemini-3.7-flash").name == "gemini"
         assert registry.resolve("gpt-5.6-sol").name == "openai"
         assert registry.resolve("openai/gpt-oss-120b").name == "groq"
 
@@ -92,7 +92,7 @@ class TestDefaultPricing:
 
 class TestCatalogueAwareFallback:
     def test_cheaper_alternatives_are_ordered_by_price(self) -> None:
-        policy = FallbackPolicy.cheaper_than("gemini-3.6-flash", limit=5)
+        policy = FallbackPolicy.cheaper_than("gemini-3.7-flash", limit=5)
 
         prices = []
         for model in policy.models:
@@ -103,7 +103,7 @@ class TestCatalogueAwareFallback:
         assert prices == sorted(prices)
 
     def test_alternatives_stay_within_the_same_provider(self) -> None:
-        policy = FallbackPolicy.cheaper_than("gemini-3.6-flash", limit=3)
+        policy = FallbackPolicy.cheaper_than("gemini-3.7-flash", limit=3)
 
         for model in policy.models:
             info = lookup_model(model)
