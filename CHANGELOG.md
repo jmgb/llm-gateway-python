@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-08-15
+
 ### Changed
 
 - The `assemblyai` and `wavespeed` extras now install `httpx2` instead of
