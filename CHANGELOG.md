@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-08-26
+
 ### Added
 
 - Every recorded attempt now carries `error_message` next to `error_type`, and
