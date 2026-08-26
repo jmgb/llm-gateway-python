@@ -17,6 +17,29 @@ if TYPE_CHECKING:
     from llm_gateway.media import ImageAttempt, VideoAttempt
 
 
+#: A provider message can carry its whole response body. This text ends up in
+#: alerts and logs, so it is cut: what identifies the failure is at the front,
+#: and the rest only fills a screen.
+MAX_ERROR_MESSAGE_CHARS = 500
+
+
+def message_of(failure: BaseException) -> str:
+    """The failure as text, truncated and never empty.
+
+    The same rule as every other message in this module applies: what a
+    provider says about *why* a call was rejected is safe to record, its echo
+    of the prompt is not, so adapters keep response content out of the errors
+    they raise and this only ever passes along what they built.
+
+    An exception with no message would record ``""``, which reads in a log as
+    "there was no error" rather than "the provider did not explain itself".
+    """
+    text = str(failure).strip() or type(failure).__name__
+    if len(text) <= MAX_ERROR_MESSAGE_CHARS:
+        return text
+    return text[:MAX_ERROR_MESSAGE_CHARS] + "…"
+
+
 class LLMGatewayError(Exception):
     """Root of every error raised by this package."""
 
@@ -104,6 +127,11 @@ class AllAttemptsFailed(LLMGatewayError):
     def last_error(self) -> str | None:
         return self.attempts[-1].error_type if self.attempts else None
 
+    @property
+    def last_error_message(self) -> str | None:
+        """What the final failure said, not just which class it belonged to."""
+        return self.attempts[-1].error_message if self.attempts else None
+
 
 class AllTranscriptionsFailed(LLMGatewayError):
     """Every audio model and retry failed, with duration accounting preserved."""
@@ -115,6 +143,11 @@ class AllTranscriptionsFailed(LLMGatewayError):
     @property
     def last_error(self) -> str | None:
         return self.attempts[-1].error_type if self.attempts else None
+
+    @property
+    def last_error_message(self) -> str | None:
+        """What the final failure said, not just which class it belonged to."""
+        return self.attempts[-1].error_message if self.attempts else None
 
 
 class AllImagesFailed(LLMGatewayError):
@@ -128,6 +161,11 @@ class AllImagesFailed(LLMGatewayError):
     def last_error(self) -> str | None:
         return self.attempts[-1].error_type if self.attempts else None
 
+    @property
+    def last_error_message(self) -> str | None:
+        """What the final failure said, not just which class it belonged to."""
+        return self.attempts[-1].error_message if self.attempts else None
+
 
 class AllVideosFailed(LLMGatewayError):
     """Every video model and retry failed, with video accounting preserved."""
@@ -139,3 +177,8 @@ class AllVideosFailed(LLMGatewayError):
     @property
     def last_error(self) -> str | None:
         return self.attempts[-1].error_type if self.attempts else None
+
+    @property
+    def last_error_message(self) -> str | None:
+        """What the final failure said, not just which class it belonged to."""
+        return self.attempts[-1].error_message if self.attempts else None

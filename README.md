@@ -415,10 +415,95 @@ These are enforced by tests, not by convention:
 | Fallback is off by default and always visible | A silent model switch corrupts A/B comparisons and cost attribution |
 | Exhausted calls **raise** | They never return something that looks like a success |
 | Errors carry the attempts already made | A failure still accounts for the money it spent |
+| A fallback alert says *why* it happened | A pair of model names alone sends a reader to logs a deploy may have rotated |
 | Output, usage, execution and cost are separate | A token count can never be mistaken for a business field |
 | Sinks never receive prompts or responses | Observability without storing content |
 | No module reads the environment | The application owns its credentials |
 | Importing needs no provider extra | Each application installs only the SDKs it calls |
+
+## Reading a failure
+
+Every attempt the gateway made is on `result.execution.attempts`, successful or
+not, and each one carries both `error_type` (the class of problem) and
+`error_message` (what it actually said). The type alone does not identify a
+failure: a rate limit, a rejected schema and a bad API key are all
+`ProviderError`.
+
+Three views are derived from that list, and they answer different questions:
+
+| Property | Type | Answers |
+|---|---|---|
+| `execution.fallback_used` | `bool` | Did the call end on a model other than the one requested? |
+| `execution.fallback_cause` | `Attempt \| None` | Which failure ended the *requested* model's turn? |
+| `execution.failures` | `tuple[Attempt, ...]` | Everything that failed, in order |
+
+`fallback_cause` is deliberately not "the last failure". With a plan of three
+models, the last failure belongs to the second model, and reporting it would
+name that model's problem as the reason the *first* was abandoned. It is the
+last failed attempt whose `model` is `requested_model`, or `None` when the
+requested model never failed — which happens when a fallback ran for a reason
+other than a failure.
+
+The same three properties exist on `AudioExecution`, `ImageExecution` and
+`VideoExecution`.
+
+When no fallback rescues the call, `AllAttemptsFailed` (and its audio, image
+and video siblings) raise with `.attempts`, plus `.last_error` and
+`.last_error_message` for the final one.
+
+### The `llm_fallback_used` alert
+
+When a call succeeds on a fallback model, `AlertSink.alert` receives
+`"llm_fallback_used"` and this payload:
+
+```python
+{
+    "requested_model": "openai/gpt-oss-120b",  # what was asked for
+    "model_used": "gpt-5.6-luna",  # what answered
+    "request_id": "15311008-aaff-...",  # as passed on the request
+    # The headline: the failure that ended the requested model's turn.
+    # All three are None if the requested model never failed.
+    "error_type": "RateLimitedError",
+    "error_message": "Rate limit reached for gpt-oss-120b: 30000 TPM",
+    "failure_phase": "provider",
+    # Every failed attempt, oldest first. One entry per attempt, so a retry
+    # appears twice; successful attempts are absent, and the list is never
+    # empty when this alert fires.
+    "failures": [
+        {
+            "attempt": 1,  # index within the whole call
+            "model": "openai/gpt-oss-120b",
+            "provider": "groq",
+            "error_type": "RateLimitedError",
+            "error_message": "Rate limit reached for gpt-oss-120b: 30000 TPM",
+            "failure_phase": "provider",
+        },
+        # ... one more for the retry, one for each further model that failed
+    ],
+}
+```
+
+`failure_phase` is one of `configuration`, `provider`, `timeout`,
+`output_parsing` or `schema_validation`, so a consumer can route on it without
+parsing text. It is `None` only when the attempt carries no phase.
+
+Reading the list matters when the headline is not enough: the same
+`error_message` repeated across two models is a request nothing will accept,
+while three different ones are three providers having a bad minute. The first
+needs a fix, the second needs nothing.
+
+Two properties of these messages are worth relying on:
+
+- **Truncated** to `MAX_ERROR_MESSAGE_CHARS` (500), with a trailing `…`. A
+  provider message can carry a whole response body, and this text reaches logs
+  and chat alerts.
+- **Never empty.** An exception with no text records its class name instead,
+  because `""` reads in a log as "there was no error", which is a different
+  claim from "the provider did not explain itself".
+
+The no-content rule still holds: adapters keep prompts and response bodies out
+of the errors they raise, so these fields carry a reason and never an echo of
+what was sent.
 
 ## Extending
 

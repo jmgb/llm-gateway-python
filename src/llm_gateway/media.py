@@ -106,6 +106,14 @@ class ImageAttempt:
     cost: ImageCost
     latency_ms: int
     error_type: str | None = None
+    error_message: str | None = None
+    """What the failure actually said, truncated to stay loggable.
+
+    ``error_type`` alone names the class of problem and stops there: a rate
+    limit, a refused schema and a wrong API key are all ``ProviderError``. The
+    message is the only part that says which one, so an operator reading an
+    alert does not have to reproduce the call to find out.
+    """
     billable: bool = True
     failure_phase: FailurePhase | None = None
 
@@ -123,6 +131,32 @@ class ImageExecution:
     @property
     def fallback_used(self) -> bool:
         return bool(self.attempts and self.attempts[-1].model != self.requested_model)
+
+    @property
+    def fallback_cause(self) -> ImageAttempt | None:
+        """The failure that made the gateway leave the requested model.
+
+        A fallback is only ever reported as a pair of model names, which says
+        that something went wrong and not what. This returns the last failed
+        attempt on the requested model, so the reason travels with the alert
+        instead of having to be dug out of a log that may already be gone.
+        """
+        for attempt in reversed(self.attempts):
+            if attempt.model == self.requested_model and attempt.outcome is AttemptOutcome.FAILED:
+                return attempt
+        return None
+
+    @property
+    def failures(self) -> tuple[ImageAttempt, ...]:
+        """Every attempt that failed, in the order they were made.
+
+        ``fallback_cause`` names the one failure that ended the requested
+        model's turn, which is the headline. It is not the whole story: a plan
+        with a retry and two models can fail three times for three different
+        reasons, and a reader who sees only the first cannot tell a provider
+        having a bad minute from a request no model will accept.
+        """
+        return tuple(a for a in self.attempts if a.outcome is AttemptOutcome.FAILED)
 
     @property
     def attempt_count(self) -> int:
@@ -249,6 +283,14 @@ class VideoAttempt:
     cost: VideoCost
     latency_ms: int
     error_type: str | None = None
+    error_message: str | None = None
+    """What the failure actually said, truncated to stay loggable.
+
+    ``error_type`` alone names the class of problem and stops there: a rate
+    limit, a refused schema and a wrong API key are all ``ProviderError``. The
+    message is the only part that says which one, so an operator reading an
+    alert does not have to reproduce the call to find out.
+    """
     billable: bool = True
     failure_phase: FailurePhase | None = None
 
@@ -266,6 +308,32 @@ class VideoExecution:
     @property
     def fallback_used(self) -> bool:
         return bool(self.attempts and self.attempts[-1].model != self.requested_model)
+
+    @property
+    def fallback_cause(self) -> VideoAttempt | None:
+        """The failure that made the gateway leave the requested model.
+
+        A fallback is only ever reported as a pair of model names, which says
+        that something went wrong and not what. This returns the last failed
+        attempt on the requested model, so the reason travels with the alert
+        instead of having to be dug out of a log that may already be gone.
+        """
+        for attempt in reversed(self.attempts):
+            if attempt.model == self.requested_model and attempt.outcome is AttemptOutcome.FAILED:
+                return attempt
+        return None
+
+    @property
+    def failures(self) -> tuple[VideoAttempt, ...]:
+        """Every attempt that failed, in the order they were made.
+
+        ``fallback_cause`` names the one failure that ended the requested
+        model's turn, which is the headline. It is not the whole story: a plan
+        with a retry and two models can fail three times for three different
+        reasons, and a reader who sees only the first cannot tell a provider
+        having a bad minute from a request no model will accept.
+        """
+        return tuple(a for a in self.attempts if a.outcome is AttemptOutcome.FAILED)
 
     @property
     def attempt_count(self) -> int:

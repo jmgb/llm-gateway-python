@@ -9,6 +9,39 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- Every recorded attempt now carries `error_message` next to `error_type`, and
+  the `llm_fallback_used` alert carries `error_type`, `error_message` and
+  `failure_phase` for the failure that ended the requested model's turn. The
+  alert used to report only the pair of model names, so an operator reading
+  "degraded from A to B" had to reconstruct the reason from provider logs that
+  a deploy may already have rotated away.
+
+  The cause is exposed as `Execution.fallback_cause` — the last *failed*
+  attempt on the requested model, not simply the last failure, so a three-model
+  plan does not blame the middle model's problem for leaving the first.
+
+  Alongside it, `Execution.failures` lists **every** failed attempt in order,
+  and the alert carries the same list under `failures` (one entry per attempt,
+  so a retry appears twice). The cause is the headline, not the whole story: a
+  plan with a retry and two models can fail three times for three reasons, and
+  the same message repeated across two models is a request nothing will accept
+  while three different ones are three providers having a bad minute.
+
+  Both properties are available on `AudioExecution`, `ImageExecution` and
+  `VideoExecution`. The payload is documented in full under "Reading a failure"
+  in the README.
+
+  The `All*Failed` errors gain `last_error_message`, so a call that no fallback
+  rescued also says what went wrong rather than only which class it was.
+
+  Messages are truncated to `MAX_ERROR_MESSAGE_CHARS` (500) and never empty: an
+  exception with no text records its class name, because `""` reads in a log as
+  "there was no error". The no-content rule is unchanged — adapters keep
+  prompts and response bodies out of the errors they raise, and this only
+  passes along the reason they built.
+
 ## [0.14.0] — 2026-08-15
 
 ### Added

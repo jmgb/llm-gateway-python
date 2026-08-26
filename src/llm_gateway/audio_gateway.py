@@ -20,6 +20,7 @@ from llm_gateway.errors import (
     LLMGatewayError,
     ProviderError,
     ProviderTimeoutError,
+    message_of,
 )
 from llm_gateway.models import lookup_model
 from llm_gateway.ports import (
@@ -157,6 +158,7 @@ class AudioGateway:
                         cost=AudioCost.unavailable(pricing_version=self._prices.version),
                         started=attempt_started,
                         error_type=ProviderTimeoutError.__name__,
+                        error_message="transcription attempt cancelled by the total timeout budget",
                         billable=True,
                         failure_phase=FailurePhase.TIMEOUT,
                     )
@@ -191,6 +193,7 @@ class AudioGateway:
                     cost=AudioCost.unavailable(pricing_version=self._prices.version),
                     started=attempt_started,
                     error_type=type(failure).__name__,
+                    error_message=message_of(failure),
                     billable=isinstance(failure, ProviderError),
                     failure_phase=_phase_of(failure),
                 )
@@ -263,6 +266,7 @@ def _record_attempt(
     cost: AudioCost,
     started: float,
     error_type: str | None = None,
+    error_message: str | None = None,
     billable: bool = True,
     failure_phase: FailurePhase | None = None,
 ) -> AudioAttempt:
@@ -275,6 +279,7 @@ def _record_attempt(
         cost=cost,
         latency_ms=int((time.perf_counter() - started) * 1000),
         error_type=error_type,
+        error_message=error_message,
         billable=billable,
         failure_phase=failure_phase,
     )

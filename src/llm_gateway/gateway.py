@@ -45,6 +45,7 @@ from llm_gateway.errors import (
     ProviderError,
     ProviderTimeoutError,
     SchemaValidationError,
+    message_of,
 )
 from llm_gateway.json_payload import parse_json_payload
 from llm_gateway.media import (
@@ -241,12 +242,28 @@ class LLMGateway:
             output = outcome.output
 
             if execution.fallback_used:
+                # Sin la causa, la alerta dice que se degradó de modelo y deja
+                # al operador reconstruyendo el porqué desde los logs, que para
+                # entonces pueden haber rotado con el despliegue.
+                cause = execution.fallback_cause
                 self._alerts.alert(
                     "llm_fallback_used",
                     {
                         "requested_model": request.model,
                         "model_used": execution.model_used,
                         "request_id": request.request_id,
+                        "error_type": cause.error_type if cause else None,
+                        "error_message": cause.error_message if cause else None,
+                        "failure_phase": (
+                            cause.failure_phase.value
+                            if cause is not None and cause.failure_phase is not None
+                            else None
+                        ),
+                        # The cause is the headline; a plan with a retry and
+                        # two models can fail three times for three different
+                        # reasons, and only the full list tells a provider
+                        # having a bad minute from a request nothing accepts.
+                        "failures": [_failure_fields(a) for a in execution.failures],
                     },
                 )
             self._usage_sink.record(
@@ -355,6 +372,7 @@ class LLMGateway:
                             cost=cost,
                             started=attempt_started,
                             error_type=type(unusable).__name__,
+                            error_message=message_of(unusable),
                             failure_phase=_phase_of(unusable),
                         )
                     )
@@ -389,6 +407,7 @@ class LLMGateway:
                     cost=Cost.unavailable(),
                     started=attempt_started,
                     error_type=type(failure).__name__,
+                    error_message=message_of(failure),
                     billable=isinstance(failure, ProviderError),
                     failure_phase=_phase_of(failure),
                 )
@@ -411,6 +430,7 @@ def _record_attempt(
     cost: Cost,
     started: float,
     error_type: str | None = None,
+    error_message: str | None = None,
     billable: bool = True,
     failure_phase: FailurePhase | None = None,
 ) -> Attempt:
@@ -423,9 +443,22 @@ def _record_attempt(
         cost=cost,
         latency_ms=int((time.perf_counter() - started) * 1000),
         error_type=error_type,
+        error_message=error_message,
         billable=billable,
         failure_phase=failure_phase,
     )
+
+
+def _failure_fields(attempt: Attempt) -> dict[str, object]:
+    """One failed attempt, flattened for a log line."""
+    return {
+        "attempt": attempt.index,
+        "model": attempt.model,
+        "provider": attempt.provider,
+        "error_type": attempt.error_type,
+        "error_message": attempt.error_message,
+        "failure_phase": attempt.failure_phase.value if attempt.failure_phase else None,
+    }
 
 
 def _phase_of(failure: LLMGatewayError) -> FailurePhase:
