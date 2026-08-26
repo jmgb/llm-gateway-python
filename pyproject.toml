@@ -30,25 +30,25 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pydantic>=2.10,<3",
+    "pydantic>=2.13,<3",
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=2.51,<4"]
-gemini = ["google-genai>=2.16,<3"]
-groq = ["groq>=1.4,<2"]
-assemblyai = ["httpx2>=2.10.0,<3"]
+openai = ["openai>=3.3,<4"]
+gemini = ["google-genai>=2.20,<3"]
+groq = ["groq>=1.7,<2"]
+assemblyai = ["httpx2>=2.12.0,<3"]
 replicate = ["replicate>=1.0,<2"]
 # WaveSpeed ships no SDK either: the adapter speaks its REST API over httpx2.
-wavespeed = ["httpx2>=2.10.0,<3"]
+wavespeed = ["httpx2>=2.12.0,<3"]
 # OpenRouter ships no SDK: it speaks the OpenAI wire format. The extra exists
 # so that installing it is named after the provider a consumer actually wants.
-openrouter = ["openai>=2.51,<4"]
+openrouter = ["openai>=3.3,<4"]
 all = [
-    "openai>=2.51,<4",
-    "google-genai>=2.16,<3",
-    "groq>=1.4,<2",
-    "httpx2>=2.10.0,<3",
+    "openai>=3.3,<4",
+    "google-genai>=2.20,<3",
+    "groq>=1.7,<2",
+    "httpx2>=2.12.0,<3",
     "replicate>=1.0,<2",
 ]
 
@@ -88,10 +88,10 @@ include = [
 
 [dependency-groups]
 dev = [
-    "mypy>=1.14",
-    "pytest>=8.3",
-    "pytest-asyncio>=0.25",
-    "ruff>=0.9",
+    "mypy>=2.3",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.16",
 ]
 
 [tool.pytest.ini_options]
