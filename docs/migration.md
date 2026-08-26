@@ -134,6 +134,68 @@ If you need behaviour the package does not offer, the supported seams are the
 ports and the policies. An underscore-prefixed symbol is not one, and nothing
 in `0.x` promises it will survive a minor.
 
+## Upgrading to 0.14.1
+
+Nothing to change. `0.14.1` only adds fields; every call site, port
+implementation and stored payload from before keeps working unmodified.
+
+Before this release, the `llm_fallback_used` alert told you *that* the gateway
+degraded from one model to another, not *why*. An operator reading "degraded
+from A to B" had to go reconstruct the reason from provider logs a deploy may
+already have rotated away. The alert now carries `error_type`,
+`error_message` and `failure_phase` for the failure that ended the requested
+model's turn, plus a `failures` list with every attempt the call made. The
+full payload shape is documented under "Reading a failure" in the README;
+this section only covers what changes for an existing consumer.
+
+If your `AlertSink.alert` implementation already forwards `fields` wholesale —
+to Sentry, to a Telegram message, to a log line — the new keys arrive with no
+code change. If it destructures specific keys instead, add the ones you want;
+the old two (`requested_model`, `model_used`) are untouched.
+
+The gap that matters is upstream of any of this: if your gateway was built
+without an `AlertSink` (the default is a no-op sink that drops the alert),
+none of this reaches you regardless of version. Registering one is the actual
+migration step; everything else follows from it for free.
+
+```python
+class SentryFallbackAlerts:
+    """Minimal AlertSink that reports why a fallback fired."""
+
+    def alert(self, message: str, fields: dict[str, object]) -> None:
+        if message != "llm_fallback_used":
+            return
+        sentry_sdk.capture_message(
+            f"Fallback {fields['requested_model']} -> {fields['model_used']}: "
+            f"{fields.get('error_type')}: {fields.get('error_message')}",
+            level="warning",
+        )
+```
+
+Reading the cause from typed code, instead of the alert payload, uses the same
+three properties the README describes:
+
+```python
+result = await gateway.generate(request)
+if result.execution.fallback_used:
+    cause = result.execution.fallback_cause  # last failed attempt on the
+    # requested model — not simply the last failure. With three models in
+    # the plan, the last failure can belong to the second model, and
+    # blaming it for why the first was abandoned would be wrong.
+    log.warning(
+        "fallback",
+        cause=cause.error_message if cause else None,
+        all_failures=[a.error_message for a in result.execution.failures],
+    )
+```
+
+```python
+try:
+    result = await gateway.generate(request)
+except AllAttemptsFailed as error:
+    log.error("no model answered", reason=error.last_error_message)
+```
+
 ## Notes for specific shapes
 
 - **A second layer over the facade** (e.g. a runner module) must migrate too;
