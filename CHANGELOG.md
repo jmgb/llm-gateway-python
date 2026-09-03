@@ -9,6 +9,18 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-09-03
+
+### Changed
+
+- The Gemini and OpenRouter entries `gemini-3.7-flash` and
+  `google/gemini-3.7-flash` are renamed to `gemini-3.8-flash` and
+  `google/gemini-3.8-flash`. Rates are unchanged (`0.75` input / `3.75` output
+  USD per MTok), but the ids that carry them are not, so `CATALOG_VERSION`
+  moves to `2026-09-03.1`. **This is breaking for callers that pin the old
+  ids**: no `3.7` entry remains, and `lookup_model("gemini-3.7-flash")` now
+  returns `None`.
+
 ## [0.14.1] — 2026-08-26
 
 ### Added

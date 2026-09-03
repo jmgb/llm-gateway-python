@@ -592,7 +592,7 @@ aggregator has that choice, so OpenRouter is the one adapter declaring
 from llm_gateway import LLMRequest, RoutingPreference
 
 LLMRequest(
-    model="google/gemini-3.7-flash",
+    model="google/gemini-3.8-flash",
     routing=RoutingPreference(order=("Groq", "SambaNova"), optimise_for="throughput"),
 )
 ```

@@ -186,8 +186,8 @@ class TestIdentity:
 
     def test_gemini_37_is_catalogued_direct_and_on_openrouter(self) -> None:
         expected = {
-            "gemini-3.7-flash": "gemini",
-            "google/gemini-3.7-flash": "openrouter",
+            "gemini-3.8-flash": "gemini",
+            "google/gemini-3.8-flash": "openrouter",
         }
 
         for model_id, provider in expected.items():
@@ -218,7 +218,7 @@ class TestIdentity:
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.6-flash",
-            "gemini-3.7-flash",
+            "gemini-3.8-flash",
         ):
             info = lookup_model(model_id)
             assert info is not None
@@ -240,7 +240,7 @@ class TestIdentity:
 
 class TestProviderRouting:
     def test_a_catalogued_model_routes_by_its_declared_provider(self) -> None:
-        assert resolve_provider("gemini-3.7-flash") == "gemini"
+        assert resolve_provider("gemini-3.8-flash") == "gemini"
 
     def test_an_openai_prefixed_groq_model_is_not_mistaken_for_openai(self) -> None:
         """`openai/gpt-oss-120b` is served by Groq, despite the prefix."""
@@ -440,8 +440,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-08-15.1"
-    PRICE_FINGERPRINT = "7de4b3b272e732f4d9ea1633381858dae6161de925d6d6dca7b2a6a8906f3945"
+    PRICED_AT_VERSION = "2026-09-03.1"
+    PRICE_FINGERPRINT = "2660e8919989e6211b5f8897594802a47f3a78aae8a11183b06b6703badc20f1"
 
     @staticmethod
     def _fingerprint() -> str:

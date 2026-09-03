@@ -204,3 +204,18 @@ except AllAttemptsFailed as error:
   before its callers are touched, so the diff stays reviewable.
 - **Comparison experiments** must pin the same model on both sides and fail
   loudly if the two diverge, or the comparison silently stops being one.
+
+## Upgrading to 0.15.0
+
+**Breaking for callers that name `gemini-3.7-flash` or
+`google/gemini-3.7-flash`.** Both entries are renamed to `gemini-3.8-flash` and
+`google/gemini-3.8-flash`. No `3.7` entry is left behind, so `lookup_model` on
+the old id returns `None` — and a `None` here is quiet: the request still goes
+out, but without the catalogue there is no `reasoning_efforts` to send and no
+rate to price the usage with. Grep for the old ids in code, environment
+variables and stored configuration before upgrading.
+
+Rates are unchanged (`0.75` input / `3.75` output USD per MTok). What moved is
+the identity that carries them, and `CATALOG_VERSION` moves with it to
+`2026-09-03.1`, so an amount recorded under `2026-08-15.1` still points at the
+table that produced it.

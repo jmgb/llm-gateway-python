@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-08-15.1"
+CATALOG_VERSION = "2026-09-03.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -403,7 +403,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
     ),
     _m(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         "gemini",
         "0.75",
         "3.75",
@@ -451,7 +451,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("google/gemini-3.5-flash", "openrouter", "1.50", "9.00"),
     _m("google/gemini-3.5-flash-lite", "openrouter", "0.30", "2.50"),
     _m("google/gemini-3.6-flash", "openrouter", "1.50", "7.50", deprecated=True),
-    _m("google/gemini-3.7-flash", "openrouter", "0.75", "3.75"),
+    _m("google/gemini-3.8-flash", "openrouter", "0.75", "3.75"),
     _m("anthropic/claude-sonnet-4.6", "openrouter", "3.00", "15.00"),
     _m("x-ai/grok-4.5", "openrouter", "2.00", "6.00"),
     _m(
