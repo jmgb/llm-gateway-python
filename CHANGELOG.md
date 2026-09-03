@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-03
+
 ### Added
 
 - Added OpenAI's `gpt-6-astra` to the shared model catalogue at `$10` input /
