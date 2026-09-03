@@ -239,6 +239,15 @@ class TestOpenAIAdapter:
 
         assert recorder.kwargs["text"] == {"verbosity": level}
 
+    async def test_gpt_6_astra_receives_verbosity_like_the_gpt_5_family(self) -> None:
+        recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(verbosity="low"), model="gpt-6-astra"
+        )
+
+        assert recorder.kwargs["text"] == {"verbosity": "low"}
+
     async def test_verbosity_travels_alongside_a_structured_format(self) -> None:
         """Both live under ``text``, so one must not overwrite the other."""
         recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))

@@ -37,6 +37,18 @@ can represent neither a minute, a picture nor a second of footage. Use
 `builtin_image_price_catalog()` with `ImageUsage` and
 `builtin_video_price_catalog()` with `VideoUsage`, for those paths.
 
+The current OpenAI reasoning models in the catalogue are priced as follows:
+
+| Model | Input / 1M tokens | Output / 1M tokens |
+|---|---:|---:|
+| `gpt-6-astra` | `$10` | `$50` |
+| `gpt-5.6-sol` | `$5` | `$30` |
+| `gpt-5.6-terra` | `$2` | `$12` |
+| `gpt-5.6-luna` | `$0.20` | `$1.20` |
+
+`gpt-6-astra` follows `gpt-5.6-sol` for request options: it accepts the same
+reasoning efforts, drops `temperature`, and forwards `verbosity` to OpenAI.
+
 ## The three measurements
 
 `Cost.measurement` is as important as the amount:

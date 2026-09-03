@@ -47,7 +47,7 @@ CAPABILITIES = ProviderCapabilities(
     reports_token_usage=True,
 )
 
-VERBOSITY_MODEL_PREFIXES = ("gpt-5",)
+VERBOSITY_MODEL_PREFIXES = ("gpt-5", "gpt-6-astra")
 """Families that document the dial.
 
 Sending it to a model that predates it is a 400 for the whole call, and a

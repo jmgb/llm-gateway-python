@@ -9,6 +9,13 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- Added OpenAI's `gpt-6-astra` to the shared model catalogue at `$10` input /
+  `$50` output USD per million tokens. It uses the OpenAI provider and the same
+  reasoning efforts and request-option handling as `gpt-5.6-sol`; `CATALOG_VERSION`
+  moves to `2026-09-03.2`.
+
 ## [0.15.1] — 2026-09-03
 
 ### Fixed

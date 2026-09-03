@@ -5,6 +5,7 @@ version string, every consumer.
 """
 
 import hashlib
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -22,6 +23,20 @@ from llm_gateway.models import (
 
 
 class TestIdentity:
+    def test_gpt_6_astra_matches_gpt_5_6_sol_except_identity_and_prices(self) -> None:
+        sol = lookup_model("gpt-5.6-sol")
+        astra = lookup_model("gpt-6-astra")
+
+        assert sol is not None
+        assert astra is not None
+        assert astra == replace(
+            sol,
+            id="gpt-6-astra",
+            input_usd_per_mtok=Decimal("10"),
+            output_usd_per_mtok=Decimal("50"),
+        )
+        assert resolve_provider("gpt-6-astra") == "openai"
+
     def test_current_openrouter_models_are_catalogued_with_their_published_rates(self) -> None:
         expected = {
             "anthropic/claude-sonnet-4.6": ("3", "15", True),
@@ -440,8 +455,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-09-03.1"
-    PRICE_FINGERPRINT = "2660e8919989e6211b5f8897594802a47f3a78aae8a11183b06b6703badc20f1"
+    PRICED_AT_VERSION = "2026-09-03.2"
+    PRICE_FINGERPRINT = "44a73db6b41dc733ba167b6742d9803e11f1f6a181e910508b54d3e29c7f9505"
 
     @staticmethod
     def _fingerprint() -> str:

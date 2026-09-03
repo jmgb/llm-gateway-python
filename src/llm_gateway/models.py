@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-09-03.1"
+CATALOG_VERSION = "2026-09-03.2"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -198,13 +198,22 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # ---- OpenAI ---------------------------------------------------------
     _m("gpt-5.1-2025-11-13", "openai", "1.25", "10.00", deprecated=True),
     _m("gpt-5.2-2025-12-11", "openai", "1.75", "14.00", deprecated=True),
-    # The 5.6 family rejects `temperature`: reasoning replaces it, and sending
-    # it fails the whole call. A fallback onto one of these must not inherit it.
+    # These OpenAI reasoning models reject `temperature`: reasoning replaces it,
+    # and sending it fails the whole call. A fallback onto one of these must not
+    # inherit it.
     _m(
         "gpt-5.6-sol",
         "openai",
         "5.00",
         "30.00",
+        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
+    _m(
+        "gpt-6-astra",
+        "openai",
+        "10.00",
+        "50.00",
         reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
         supports_temperature=False,
     ),

@@ -647,6 +647,12 @@ resolution and are priced through a `VideoPriceCatalog`. Override prices for neg
 catalog protocol yourself. See
 [`docs/pricing.md`](docs/pricing.md).
 
+The catalogue includes OpenAI's `gpt-6-astra` at `$10` input / `$50` output per
+million tokens. It follows the same OpenAI routing and request-option rules as
+`gpt-5.6-sol`: reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`
+and `max`; `temperature` is omitted because the model rejects it; and
+`verbosity` is forwarded when requested.
+
 ## Not in this version
 
 Inline files, streaming and Gemini File Search remain absent, and so do
