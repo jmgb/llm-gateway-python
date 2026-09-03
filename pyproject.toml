@@ -1,6 +1,6 @@
 [project]
 name = "neutral-llm-gateway"
-version = "0.15.0"
+version = "0.15.1"
 description = "Neutral LLM gateway: typed contracts, provider adapters and explicit retry, fallback, usage and cost accounting."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=3.3,<4"]
+openai = ["openai>=2.54,<4"]
 gemini = ["google-genai>=2.20,<3"]
 groq = ["groq>=1.7,<2"]
 assemblyai = ["httpx2>=2.12.0,<3"]
@@ -43,9 +43,9 @@ replicate = ["replicate>=1.0,<2"]
 wavespeed = ["httpx2>=2.12.0,<3"]
 # OpenRouter ships no SDK: it speaks the OpenAI wire format. The extra exists
 # so that installing it is named after the provider a consumer actually wants.
-openrouter = ["openai>=3.3,<4"]
+openrouter = ["openai>=2.54,<4"]
 all = [
-    "openai>=3.3,<4",
+    "openai>=2.54,<4",
     "google-genai>=2.20,<3",
     "groq>=1.7,<2",
     "httpx2>=2.12.0,<3",

@@ -9,9 +9,33 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-09-03
+
+### Fixed
+
+- The `openai` and `openrouter` extras accept `openai>=2.54,<4` again. `0.15.0`
+  shipped a floor of `>=3.3` that had been raised in the working tree as
+  routine maintenance and never released; arriving inside a catalogue release,
+  it made the package unresolvable for every consumer pinned to `openai<3` —
+  five of the six in this account — and the failure surfaced as an
+  unsatisfiable lock, not as anything about the id that was actually being
+  changed.
+
+  The floor was never earned: the package's whole OpenAI surface is
+  `AsyncOpenAI(api_key=..., base_url=...)`, and the suite passes unchanged
+  against `openai==2.54.0`. A dependency floor states what the code needs, not
+  what happened to be installed the day it was written.
+
 ## [0.15.0] — 2026-09-03
 
 ### Changed
+
+- Dependency floors move up: `pydantic>=2.13`, `google-genai>=2.20`,
+  `groq>=1.7` and `httpx2>=2.12` (and `openai>=3.3`, walked back in `0.15.1`).
+  These were raised in the working tree on 2026-08-26 as routine maintenance
+  and rode along with this release; none of them is required by a change in
+  this package's code.
+
 
 - The Gemini and OpenRouter entries `gemini-3.7-flash` and
   `google/gemini-3.7-flash` are renamed to `gemini-3.8-flash` and

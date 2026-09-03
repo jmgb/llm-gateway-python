@@ -219,3 +219,10 @@ Rates are unchanged (`0.75` input / `3.75` output USD per MTok). What moved is
 the identity that carries them, and `CATALOG_VERSION` moves with it to
 `2026-09-03.1`, so an amount recorded under `2026-08-15.1` still points at the
 table that produced it.
+
+## Upgrading to 0.15.1
+
+Nothing to change, and prefer it over `0.15.0`. That release carried an
+unreleased bump of the `openai` floor to `>=3.3`, which no consumer pinned to
+`openai<3` could resolve; `0.15.1` restores `>=2.54,<4`. The catalogue and the
+rename from `Upgrading to 0.15.0` are identical in both.
