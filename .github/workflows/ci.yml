@@ -27,33 +27,5 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
 
-      - name: Sync (no provider extras, on purpose)
-        run: uv sync --locked
-
-      - name: Verify Python version
-        run: >-
-          uv run python -c
-          'import os, sys; expected = tuple(map(int, os.environ["UV_PYTHON"].split(".")));
-          assert sys.version_info[:2] == expected, (sys.version, expected)'
-
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Format
-        run: uv run ruff format --check .
-
-      - name: Types
-        run: uv run mypy
-
-      - name: Tests
-        run: uv run pytest
-
-      - name: Build sdist and wheel
-        run: uv build
-
-      # The same audit both publishers run, moved to every pull request. A
-      # packaging regression is otherwise invisible until release day, which is
-      # exactly when nobody wants to discover it: 0.6.0's sdist carried a local
-      # .env and built, uploaded and installed perfectly well.
-      - name: Audit what would be published
-        run: python3 scripts/audit_dist.py
+      - name: Shared local and CI checks
+        run: bash scripts/ci-local.sh "${{ matrix.python-version }}"

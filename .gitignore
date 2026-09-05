@@ -10,3 +10,5 @@ build/
 .ruff_cache/
 .env
 .agent/
+
+.venv-ci-*/

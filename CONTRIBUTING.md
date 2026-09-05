@@ -204,3 +204,21 @@ the same commit that changes the price.
 Explain *why*, not just what. If a change alters cost accounting or retry
 behaviour in any way, say so explicitly in the description: those are the parts
 people depend on being boring and predictable.
+
+
+## Local checks before pushing
+
+Install the versioned hook once in each clone:
+
+```bash
+git config --local core.hooksPath .githooks
+bash scripts/ci-local.sh
+```
+
+GitHub Actions invokes the same script. The hook rejects an uncommitted tree,
+a push of a commit other than the checked-out HEAD, failed checks, and edits
+made during validation. Deleting a ref does not run checks.
+The hook runs Python 3.11 and 3.13 in ignored `.venv-ci-*` environments,
+without provider extras. Each version runs lint, formatting, mypy, offline tests,
+the build and the artifact audit. To check one interpreter:
+`bash scripts/ci-local.sh 3.11`. No release is created or uploaded.
