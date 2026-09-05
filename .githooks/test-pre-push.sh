@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Exercise the installed hook with a real disposable repository, without CI tools.
 set -euo pipefail
+# Git hooks may export an absolute GIT_DIR/GIT_WORK_TREE. A cd alone is not isolation.
+while IFS= read -r variable; do
+    unset "$variable"
+done < <(git rev-parse --local-env-vars)
 hook="$(cd "$(dirname "$0")" && pwd)/pre-push"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

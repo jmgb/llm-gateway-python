@@ -20,3 +20,4 @@ case "${1:-all}" in
     *) echo "usage: bash scripts/ci-local.sh [all|3.11|3.13]" >&2; exit 2 ;;
 esac
 bash .githooks/test-pre-push.sh
+bash .githooks/test-env-isolation.sh
