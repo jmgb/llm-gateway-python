@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-09-21
+
 ### Changed
 
 - Share local pre-push checks with CI across Python 3.11 and 3.13, including artifact auditing.
