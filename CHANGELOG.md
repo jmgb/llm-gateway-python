@@ -12,6 +12,13 @@ consumer pins an immutable tag and upgrades through its own pull request.
 ### Changed
 
 - Share local pre-push checks with CI across Python 3.11 and 3.13, including artifact auditing.
+- Provider errors now name the provider's short error code after the status:
+  `provider returned HTTP 400 (json_validate_failed)`. One status covers
+  failures with nothing in common — Groq answers 400 both for a bad parameter
+  and for output that failed its JSON check — and the code was the only part
+  of the body that told them apart, yet it was dropped with the rest. Only a
+  bare identifier (`code`, else `type`, else Google's `status` name) is
+  copied; free text still is not, so no payload or credential can travel.
 
 ## [0.16.0] — 2026-09-03
 

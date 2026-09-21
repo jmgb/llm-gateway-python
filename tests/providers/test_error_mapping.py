@@ -17,10 +17,19 @@ from llm_gateway.providers.error_mapping import classify_provider_error
 
 
 class FakeSDKError(Exception):
-    def __init__(self, message: str = "boom", status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "boom",
+        status_code: int | None = None,
+        *,
+        code: object = None,
+        type: str | None = None,  # the SDK attribute is called `type`
+    ) -> None:
         super().__init__(message)
         if status_code is not None:
             self.status_code = status_code
+        self.code = code
+        self.type = type
 
 
 def test_429_is_rate_limited() -> None:
@@ -80,3 +89,39 @@ def test_the_message_never_leaks_the_original_payload() -> None:
     original = FakeSDKError("api key sk-secret-value rejected", status_code=401)
 
     assert "sk-secret-value" not in str(classify_provider_error(original))
+
+
+def test_a_provider_error_code_is_named_in_the_message() -> None:
+    """Groq answers 400 for a bad parameter and for output that failed its
+    JSON check alike; only the short ``code`` tells them apart."""
+    original = FakeSDKError(
+        "Failed to generate JSON. <the whole body>",
+        status_code=400,
+        code="json_validate_failed",
+    )
+
+    assert str(classify_provider_error(original)) == (
+        "provider returned HTTP 400 (json_validate_failed)"
+    )
+
+
+def test_the_error_type_names_the_failure_when_there_is_no_code() -> None:
+    original = FakeSDKError(status_code=400, type="invalid_request_error")
+
+    assert str(classify_provider_error(original)) == (
+        "provider returned HTTP 400 (invalid_request_error)"
+    )
+
+
+def test_a_code_that_is_not_an_identifier_is_not_copied() -> None:
+    """Only a bare identifier is safe: anything with spaces could be the
+    provider's free text echoing the request."""
+    original = FakeSDKError(status_code=400, code="api key sk-secret-value rejected")
+
+    assert str(classify_provider_error(original)) == "provider returned HTTP 400"
+
+
+def test_a_numeric_code_is_a_status_not_a_reason() -> None:
+    original = FakeSDKError(code=429)
+
+    assert str(classify_provider_error(original)) == "provider returned HTTP 429"
