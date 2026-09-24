@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-09-24
+
 ### Added
 
 - OpenAI's `gpt-6-sol` (`$2` input / `$10` output per 1M tokens) and
