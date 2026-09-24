@@ -341,13 +341,13 @@ class TestReasoningEffortRouting:
         fallback = FakeAdapter(_ok("fallback answer"))
         fallback.name = "groq"
         registry = ProviderRegistry()
-        registry.register(primary, model_prefixes=("gpt-5.6-",))
+        registry.register(primary, model_prefixes=("gpt-6-",))
         registry.register(fallback, model_prefixes=("openai/gpt-oss-",))
         gateway = LLMGateway(registry=registry)
 
         result = await gateway.generate(
             _request(
-                model="gpt-5.6-luna",
+                model="gpt-6-luna",
                 reasoning_effort="max",
                 fallback_policy=FallbackPolicy.models_in_order("openai/gpt-oss-120b"),
             )

@@ -12,6 +12,7 @@ Chat Completions and cannot promise this one's capabilities.
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -22,13 +23,14 @@ from llm_gateway.audio import (
 )
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
-from llm_gateway.errors import ConfigurationError
+from llm_gateway.errors import ConfigurationError, LLMGatewayError, ProviderError
+from llm_gateway.media import GeneratedImage, ImageRequest, ProviderImageResponse
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.schema_prompt import system_prompt_for
 from llm_gateway.providers.strict_schema import strict_json_schema
 from llm_gateway.tools import FunctionTool, ProviderToolCall, RequiredTool, ToolChoice
-from llm_gateway.usage import TokenUsage
+from llm_gateway.usage import ImageUsage, TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=True,
@@ -40,6 +42,12 @@ CAPABILITIES = ProviderCapabilities(
     inline_files=False,
     remote_files=True,
     audio_transcription=True,
+    # The gpt-image family, reached through the Images API rather than
+    # Responses. The catalogue keeps the two apart: an image model is
+    # modality="image", so generate() refuses it and the image gateway is the
+    # only way in.
+    image_generation=True,
+    image_editing=True,
     reasoning_effort=True,
     verbosity=True,
     upstream_routing=False,
@@ -47,7 +55,7 @@ CAPABILITIES = ProviderCapabilities(
     reports_token_usage=True,
 )
 
-VERBOSITY_MODEL_PREFIXES = ("gpt-5", "gpt-6-astra")
+VERBOSITY_MODEL_PREFIXES = ("gpt-5", "gpt-6")
 """Families that document the dial.
 
 Sending it to a model that predates it is a 400 for the whole call, and a
@@ -79,6 +87,50 @@ class OpenAIAdapter:
             model_used=getattr(raw, "model", None),
             tool_calls=_tool_calls(raw),
         )
+
+    async def generate_image(self, request: ImageRequest, *, model: str) -> ProviderImageResponse:
+        """Translate to the Images API, which is not the Responses one.
+
+        Editing and generating are two endpoints rather than one call with an
+        optional field, so the presence of a source image decides which is
+        used. Neither accepts an aspect ratio, and squaring a portrait the
+        caller asked for is a bug that only shows up in the finished picture.
+        """
+        if request.aspect_ratio is not None:
+            raise ConfigurationError(
+                "OpenAI sizes images as WIDTHxHEIGHT; it takes no aspect ratio"
+            )
+
+        kwargs: dict[str, Any] = {"model": model, "prompt": request.prompt}
+        if request.size is not None:
+            kwargs["size"] = request.size
+        # Left out when unstated: OpenAI's own default applies, and the reply
+        # reports the output tokens it produced, so the bill stays priceable
+        # either way.
+        if request.quality is not None:
+            kwargs["quality"] = request.quality
+
+        try:
+            if request.image is None:
+                raw = await self._client.images.generate(**kwargs)
+            else:
+                if request.image.data is None:
+                    raise ConfigurationError(
+                        "OpenAI needs the source image as bytes; it does not fetch a URL"
+                    )
+                mime_type = request.image.mime_type or "image/png"
+                kwargs["image"] = (
+                    f"image.{mime_type.rsplit('/', 1)[-1]}",
+                    request.image.data,
+                    mime_type,
+                )
+                raw = await self._client.images.edit(**kwargs)
+        except LLMGatewayError:
+            raise
+        except Exception as error:
+            raise classify_provider_error(error) from None
+
+        return _image_response(raw, model=model)
 
     async def transcribe(
         self, request: TranscriptionRequest, *, model: str
@@ -263,6 +315,56 @@ def _usage(raw: Any) -> TokenUsage:
         # breakdown, so it must not be added to the billable output.
         output_tokens=getattr(raw, "output_tokens", None),
         reasoning_tokens=getattr(details, "reasoning_tokens", None),
+        cached_input_tokens=getattr(
+            getattr(raw, "input_tokens_details", None), "cached_tokens", None
+        ),
+    )
+
+
+def _image_response(raw: Any, *, model: str) -> ProviderImageResponse:
+    """Read the pictures and the three-way token split out of one reply."""
+    images: list[GeneratedImage] = []
+    mime_type = _image_mime_type(raw)
+    for item in getattr(raw, "data", None) or ():
+        encoded = getattr(item, "b64_json", None)
+        if encoded:
+            images.append(GeneratedImage(data=base64.b64decode(encoded), mime_type=mime_type))
+            continue
+        url = getattr(item, "url", None)
+        if url:
+            images.append(GeneratedImage(url=str(url), mime_type=mime_type))
+    if not images:
+        raise ProviderError(f"OpenAI returned no image for {model}")
+
+    usage = getattr(raw, "usage", None)
+    details = getattr(usage, "input_tokens_details", None)
+    return ProviderImageResponse(
+        images=tuple(images),
+        usage=ImageUsage(
+            images=len(images),
+            tokens=_image_usage(usage),
+            # Absent rather than zero when the provider reported no breakdown:
+            # the image price catalogue would otherwise charge a reference
+            # photo at the cheaper text rate and understate the invoice.
+            input_image_tokens=getattr(details, "image_tokens", None),
+        ),
+        model_used=model,
+    )
+
+
+def _image_mime_type(raw: Any) -> str:
+    """PNG unless the reply says otherwise, which is the API's own default."""
+    output_format = getattr(raw, "output_format", None)
+    return f"image/{output_format}" if output_format else "image/png"
+
+
+def _image_usage(raw: Any) -> TokenUsage:
+    """The Images API reports no reasoning, so only the two totals are read."""
+    if raw is None:
+        return TokenUsage.unknown()
+    return TokenUsage(
+        input_tokens=getattr(raw, "input_tokens", None),
+        output_tokens=getattr(raw, "output_tokens", None),
         cached_input_tokens=getattr(
             getattr(raw, "input_tokens_details", None), "cached_tokens", None
         ),

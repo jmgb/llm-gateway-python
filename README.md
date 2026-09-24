@@ -264,11 +264,37 @@ watermarking it and enforcing a per-user quota stay in the application, exactly
 as decoding audio does.
 
 Editing needs a source image in the form the provider accepts — bytes for
-Gemini, a URL for Replicate — and an adapter that cannot use the form it was
-given raises rather than dropping it. WaveSpeed's text-to-image models refuse
-an edit outright. Sending an image model through `generate()` raises too: its
-reply carries no text, and returning it as an empty success is the failure this
-separation exists to prevent.
+Gemini and OpenAI, a URL for Replicate — and an adapter that cannot use the
+form it was given raises rather than dropping it. WaveSpeed's text-to-image
+models refuse an edit outright. Sending an image model through `generate()`
+raises too: its reply carries no text, and returning it as an empty success is
+the failure this separation exists to prevent.
+
+`size` and `quality` are the two options a provider either publishes or
+refuses. OpenAI's `gpt-image-2.5-flare` and `gpt-image-2.5-sunburst` take a
+`WIDTHxHEIGHT` size (multiples of 16, between 1:3 and 3:1) and a quality tier;
+Gemini sizes by `aspect_ratio` and publishes no tiers; WaveSpeed sizes each
+model in its own catalogue entry. An adapter that has no field for one of them
+raises, because a dropped `size` returns the wrong shape and a dropped
+`quality` returns a tier that can cost four times what the caller budgeted:
+
+```python
+result = await gateway.generate_image(
+    ImageRequest(
+        model="gpt-image-2.5-flare",
+        prompt="a tuxedo cat in an airliner cockpit at sunrise",
+        image=ImageInput(data=reference_photo, mime_type="image/png"),
+        size="768x1376",
+        quality="high",  # unstated leaves the tier to OpenAI
+    )
+)
+```
+
+Quality is a price, not a preference: at 768x1376 the same call returns 239
+output tokens at `medium` and 991 at `high`. It is left unset rather than
+defaulted to the cheapest tier — unlike `VideoRequest.resolution` — because
+the reply reports the tokens it actually produced, so either choice is priced
+from a measurement instead of a guess.
 
 ### Video generation
 
@@ -459,7 +485,7 @@ When a call succeeds on a fallback model, `AlertSink.alert` receives
 ```python
 {
     "requested_model": "openai/gpt-oss-120b",  # what was asked for
-    "model_used": "gpt-5.6-luna",  # what answered
+    "model_used": "gpt-6-luna",  # what answered
     "request_id": "15311008-aaff-...",  # as passed on the request
     # The headline: the failure that ended the requested model's turn.
     # All three are None if the requested model never failed.
@@ -519,7 +545,7 @@ that application's local adapter.
 
 | Provider | Extra | Notes |
 |---|---|---|
-| OpenAI | `[openai]` | Responses API |
+| OpenAI | `[openai]` | Responses API, plus the Images API for the `gpt-image` family |
 | Google Gemini | `[gemini]` | `google-genai` async surface, not the retired `google-generativeai` |
 | Groq | `[groq]` | Chat Completions. Declares no schema enforcement; the schema is described in the messages and the gateway validates after |
 | AssemblyAI | `[assemblyai]` | REST submit/poll transcription API |
@@ -559,8 +585,8 @@ and the Responses adapter appends them to the last user message as
 `input_file` parts. Providers without that capability reject the request rather
 than silently dropping the files. OpenAI, Groq and AssemblyAI expose
 `audio_transcription=True` through the separate `TranscriptionRequest` API,
-and Gemini, Replicate and WaveSpeed expose `image_generation=True` through
-`ImageRequest`. WaveSpeed and Replicate both declare `video_generation=True`
+and OpenAI, Gemini, Replicate and WaveSpeed expose `image_generation=True`
+through `ImageRequest`. WaveSpeed and Replicate both declare `video_generation=True`
 and `video_from_image=True`, reached through `VideoRequest` — WaveSpeed by
 awaiting `generate_video()`, Replicate through `submit_video()` and
 `poll_video()`. Only Replicate declares `video_webhooks=True`, so an
@@ -621,7 +647,7 @@ registry = build_registry(
     openrouter_client=create_openrouter_client(api_key=...),
 )
 
-registry.resolve("gpt-5.6-luna")  # openai
+registry.resolve("gpt-6-luna")  # openai
 registry.resolve("deepseek/deepseek-v4-pro")  # openrouter, from the catalogue
 registry.resolve("somevendor/brand-new")  # raises: not in the catalogue
 registry.resolve("openai/gpt-oss-120b")  # groq — the prefix is not OpenAI
@@ -647,11 +673,14 @@ resolution and are priced through a `VideoPriceCatalog`. Override prices for neg
 catalog protocol yourself. See
 [`docs/pricing.md`](docs/pricing.md).
 
-The catalogue includes OpenAI's `gpt-6-astra` at `$10` input / `$50` output per
-million tokens. It follows the same OpenAI routing and request-option rules as
-`gpt-5.6-sol`: reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`
-and `max`; `temperature` is omitted because the model rejects it; and
-`verbosity` is forwarded when requested.
+The catalogue's current OpenAI reasoning family is `gpt-6-astra` at `$10`
+input / `$50` output per million tokens, `gpt-6-sol` at `$2` / `$10` and
+`gpt-6-luna` at `$0.10` / `$0.50`. All three share one set of routing and
+request-option rules: reasoning efforts are `none`, `low`, `medium`, `high`,
+`xhigh` and `max`; `temperature` is omitted because the models reject it; and
+`verbosity` is forwarded when requested. The `gpt-5.6-sol` and `gpt-5.6-luna`
+they replace stay resolvable for a pinned caller, but are marked deprecated so
+no derived fallback chain lands back on the dearer generation.
 
 ## Not in this version
 

@@ -31,7 +31,7 @@ async def test_a_request_rejected_before_dispatch_has_a_configuration_phase() ->
     with pytest.raises(AllAttemptsFailed) as caught:
         await LLMGateway(registry=registry).generate(
             LLMRequest(
-                model="gpt-5.6-luna",
+                model="gpt-6-luna",
                 response_format=ResponseFormat.JSON_SCHEMA,
                 response_schema=FreeFormAnswer,
             )

@@ -42,12 +42,19 @@ The current OpenAI reasoning models in the catalogue are priced as follows:
 | Model | Input / 1M tokens | Output / 1M tokens |
 |---|---:|---:|
 | `gpt-6-astra` | `$10` | `$50` |
-| `gpt-5.6-sol` | `$5` | `$30` |
+| `gpt-6-sol` | `$2` | `$10` |
 | `gpt-5.6-terra` | `$2` | `$12` |
-| `gpt-5.6-luna` | `$0.20` | `$1.20` |
+| `gpt-6-luna` | `$0.10` | `$0.50` |
+| `gpt-5.6-sol` (deprecated) | `$5` | `$30` |
+| `gpt-5.6-luna` (deprecated) | `$0.20` | `$1.20` |
 
-`gpt-6-astra` follows `gpt-5.6-sol` for request options: it accepts the same
-reasoning efforts, drops `temperature`, and forwards `verbosity` to OpenAI.
+The three `gpt-6` models share one set of request options: they accept the same
+reasoning efforts, drop `temperature`, and forward `verbosity` to OpenAI.
+
+The deprecated `gpt-5.6` pair is still resolvable, so a caller pinned to either
+id keeps routing and keeps being priced. Deprecation only bars them from
+`FallbackPolicy.cheaper_than`, which would otherwise derive a chain that climbs
+back onto the dearer generation now that `gpt-6-luna` is the floor.
 
 ## The three measurements
 
@@ -78,6 +85,7 @@ Providers disagree here, so each adapter normalises at its boundary:
 | Provider | Reported as | Adapter |
 |---|---|---|
 | OpenAI (Responses) | `output_tokens_details.reasoning_tokens`, already inside `output_tokens` | passed through |
+| OpenAI (Images) | no reasoning; `input_tokens_details` splits text from image input | split kept in `ImageUsage.input_image_tokens` |
 | OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through |
 | Gemini | `thoughts_token_count`, **outside** `candidates_token_count` | folded into `output_tokens` |
 | AssemblyAI | no token usage; duration belongs to the audio contract | kept out of token pricing |
@@ -182,6 +190,8 @@ which one each model uses rather than picking a single fiction:
 | `gemini-3.1-flash-image` | Gemini | tokens | `$0.50` input / `$60` image output per 1M tokens |
 | `gemini-3.1-flash-lite-image` | Gemini | tokens | `$0.25` input / `$30` image output per 1M tokens |
 | `gemini-3-pro-image` | Gemini | tokens | `$2` input / `$120` image output per 1M tokens |
+| `gpt-image-2.5-flare` | OpenAI | tokens | `$5` text input / `$8` image input / `$30` image output per 1M tokens |
+| `gpt-image-2.5-sunburst` | OpenAI | tokens | `$5` text input / `$8` image input / `$30` image output per 1M tokens |
 | `black-forest-labs/flux-kontext-pro` | Replicate | per image | `$0.04` |
 | `wavespeed-ai/hidream-i1-dev` | WaveSpeed | per image | `$0.012` |
 | `wavespeed-ai/chroma` | WaveSpeed | per image | `$0.015` |
@@ -208,6 +218,22 @@ Gemini's image-output token rate is deliberately separate from its text-output
 rate. Treating the two as one would understate an image invoice by up to 20×.
 WaveSpeed charges `$0.012` per HiDream I1 Dev run at the documented default
 shape.
+
+OpenAI's `gpt-image` models need a third rate for the same reason: a reference
+photo is billed at `$8` per 1M tokens and prompt text at `$5`, and a photo is
+roughly twice a prompt in tokens — one 768×1376 edit measured 992 image tokens
+against 507 of text. `ImageRate.input_image_microusd_per_token` carries the
+image rate and `ImageUsage.input_image_tokens` carries the count the adapter
+read from `input_tokens_details`; the remaining input tokens are priced at the
+text rate. When a model declares both rates and the reply reports no split, the
+cost is `UNAVAILABLE` rather than the cheaper of the two: charging an unsplit
+input at either rate is a number nobody measured.
+
+Quality tiers move the same bill by multiples and are not defaulted here.
+`ImageRequest.quality` is sent when the caller states it and omitted when they
+do not, because OpenAI reports the output tokens it produced either way, so
+both paths are priced from a measurement. `VideoRequest.resolution` is
+defaulted to the cheapest tier precisely because it is *not* reported back.
 
 Image retries and fallbacks are represented by `ImageAttempt`/`ImageExecution`,
 recorded through `ImageUsageSink`, and never enter token usage or token

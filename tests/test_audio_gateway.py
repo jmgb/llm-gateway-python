@@ -135,7 +135,7 @@ async def test_a_token_model_cannot_enter_the_transcription_path() -> None:
 
     with pytest.raises(AllTranscriptionsFailed):
         await _gateway(adapter).transcribe(
-            TranscriptionRequest(model="gpt-5.6-luna", audio=AudioInput(data=b"audio"))
+            TranscriptionRequest(model="gpt-6-luna", audio=AudioInput(data=b"audio"))
         )
 
     assert adapter.requests == []

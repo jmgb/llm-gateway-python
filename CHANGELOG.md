@@ -9,6 +9,46 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- OpenAI's `gpt-6-sol` (`$2` input / `$10` output per 1M tokens) and
+  `gpt-6-luna` (`$0.10` / `$0.50`), which halve the rates of the `gpt-5.6` pair
+  they replace. Both declare the same request options as `gpt-6-astra`: the six
+  reasoning efforts, no `temperature`, and `verbosity` forwarded. The adapter's
+  verbosity gate widens from the single `gpt-6-astra` id to the `gpt-6` family,
+  since every model in it publishes the dial. `CATALOG_VERSION` moves to
+  `2026-09-24`.
+
+- OpenAI image generation. The existing OpenAI adapter now serves the Images
+  API alongside Responses and Audio, declares `image_generation=True` and
+  `image_editing=True`, and reaches `gpt-image-2.5-flare` and
+  `gpt-image-2.5-sunburst`, both added to the catalogue. A prompt alone goes to
+  `images.generate`; an `ImageInput` carrying bytes goes to `images.edit`, and
+  one carrying only a URL raises rather than being fetched on the caller's
+  behalf. `CATALOG_VERSION` moves to `2026-09-09`.
+- `ImageRequest.size` and `ImageRequest.quality`. A provider that publishes
+  neither field raises `ConfigurationError` instead of dropping the option:
+  a dropped size returns the wrong shape and a dropped quality tier can cost
+  four times what the caller budgeted. Gemini, Replicate and WaveSpeed refuse
+  both; OpenAI sends both.
+- `ImageUsage.input_image_tokens` and `ImageRate.input_image_microusd_per_token`,
+  for providers that bill a reference image above prompt text. OpenAI charges
+  `$8` per 1M image-input tokens against `$5` for text, and a reference photo is
+  around twice a prompt in tokens, so pricing an edit at the text rate alone
+  understates it by roughly a sixth. A model declaring both rates whose reply
+  reports no split now costs `UNAVAILABLE` rather than the cheaper of the two.
+
+### Changed
+
+- `gpt-5.6-sol` and `gpt-5.6-luna` are now `deprecated`. They stay in the
+  catalogue — a caller pinned to either id keeps routing and keeps being
+  priced — but `FallbackPolicy.cheaper_than` no longer derives a chain onto
+  them, which it otherwise would, and at four to five times the rate of the
+  `gpt-6` model that supersedes each.
+- `OPENAI_56_REASONING_EFFORTS` is now `OPENAI_REASONING_EFFORTS`. The tuple was
+  never 5.6-specific and `gpt-6` publishes the same six values; the old name
+  would have read as a legacy list the new models merely borrowed.
+
 ## [0.17.0] — 2026-09-21
 
 ### Changed

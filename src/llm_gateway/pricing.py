@@ -149,6 +149,9 @@ class ImageRate:
 
     usd_per_image: Decimal | None = None
     token_rate: ModelRate | None = None
+    input_image_microusd_per_token: Decimal | None = None
+    """A second input rate, for providers that charge more for a reference
+    image than for prompt text. ``token_rate.input`` prices the remainder."""
 
     def __post_init__(self) -> None:
         if (self.usd_per_image is None) == (self.token_rate is None):
@@ -157,6 +160,11 @@ class ImageRate:
             raise ValueError("image price must be finite")
         if self.usd_per_image is not None and self.usd_per_image < 0:
             raise ValueError("image price cannot be negative")
+        image_input = self.input_image_microusd_per_token
+        if image_input is not None and self.token_rate is None:
+            raise ValueError("an image-input token rate needs a token rate to complete")
+        if image_input is not None and (not image_input.is_finite() or image_input < 0):
+            raise ValueError("image input token rate must be finite and non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,8 +415,19 @@ class StaticImagePriceCatalog:
             billable_output = tokens.billable_output_tokens
             if billable_input is None and billable_output is None:
                 return None
+            image_input_rate = rate.input_image_microusd_per_token
+            image_input_tokens = 0
+            if image_input_rate is not None and billable_input is not None:
+                # The model bills two input rates and the usage reported only a
+                # total, so which rate applies to how much of it is unknown.
+                # Charging it all at either one is a number nobody measured.
+                if usage.input_image_tokens is None:
+                    return None
+                image_input_tokens = min(usage.input_image_tokens, billable_input)
             return (
-                Decimal(billable_input or 0) * rate.token_rate.input_microusd_per_token
+                Decimal(image_input_tokens) * (image_input_rate or Decimal(0))
+                + Decimal((billable_input or 0) - image_input_tokens)
+                * rate.token_rate.input_microusd_per_token
                 + Decimal(billable_output or 0) * rate.token_rate.output_microusd_per_token
             )
         if usage.images is None:

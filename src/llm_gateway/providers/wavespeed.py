@@ -26,6 +26,7 @@ from llm_gateway.media import (
 )
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
+from llm_gateway.providers.validation import reject_unsendable_image_options
 from llm_gateway.usage import ImageUsage, VideoUsage
 
 CAPABILITIES = ProviderCapabilities(
@@ -105,6 +106,7 @@ class WaveSpeedAdapter:
             raise ConfigurationError("this WaveSpeed model does not support image editing")
         if request.aspect_ratio is not None:
             raise ConfigurationError("WaveSpeed sizes images explicitly, not by aspect ratio")
+        reject_unsendable_image_options(request, provider=self.name)
 
         try:
             submitted = await self._client.post(f"/api/v3/{model}", json={"prompt": request.prompt})

@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-09-03.2"
+CATALOG_VERSION = "2026-09-24"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -32,7 +32,7 @@ Modality = Literal["text", "audio", "image", "video"]
 """What a model does, which is not how it is billed: Gemini's image models are
 billed in tokens and still cannot answer a text call. Routing reads this,
 pricing reads ``pricing_unit``."""
-OPENAI_56_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+OPENAI_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "none",
     "low",
     "medium",
@@ -85,6 +85,11 @@ class ModelInfo:
     bills community models by GPU time, so a fixed number would be a guess."""
     image_output_usd_per_mtok: Decimal | None = None
     """Image-output token rate when it differs from the model's text output rate."""
+    image_input_usd_per_mtok: Decimal | None = None
+    """Image-input token rate when it differs from the model's text input rate.
+
+    OpenAI's image models publish both; Google's publish one rate covering
+    text and image alike, and leave this ``None``."""
     video_usd_per_second: Decimal | None = None
     video_usd_per_second_by_resolution: Mapping[str, Decimal] = field(
         default_factory=lambda: MappingProxyType({})
@@ -135,7 +140,8 @@ class ModelInfo:
                 token_rate=ModelRate(
                     input_microusd_per_token=self.input_usd_per_mtok,
                     output_microusd_per_token=output_rate,
-                )
+                ),
+                input_image_microusd_per_token=self.image_input_usd_per_mtok,
             )
         if self.image_usd_per_image is None:
             return None
@@ -158,6 +164,7 @@ def _m(
     modality: Modality = "text",
     image_price: str | None = None,
     image_output_price_per_mtok: str | None = None,
+    image_input_price_per_mtok: str | None = None,
     video_price_per_second: str | None = None,
     video_prices_by_resolution: dict[str, str] | None = None,
 ) -> ModelInfo:
@@ -182,6 +189,9 @@ def _m(
             if image_output_price_per_mtok is not None
             else None
         ),
+        image_input_usd_per_mtok=(
+            Decimal(image_input_price_per_mtok) if image_input_price_per_mtok is not None else None
+        ),
         video_usd_per_second=(
             Decimal(video_price_per_second) if video_price_per_second is not None else None
         ),
@@ -202,11 +212,31 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # and sending it fails the whole call. A fallback onto one of these must not
     # inherit it.
     _m(
+        "gpt-6-sol",
+        "openai",
+        "2.00",
+        "10.00",
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
+    _m(
+        "gpt-6-luna",
+        "openai",
+        "0.10",
+        "0.50",
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
+    # Superseded by the gpt-6 pair above, which is cheaper at every effort.
+    # Kept resolvable so a pinned caller still routes, and deprecated so no
+    # fallback chain derives its way back onto the dearer generation.
+    _m(
         "gpt-5.6-sol",
         "openai",
         "5.00",
         "30.00",
-        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        deprecated=True,
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
     _m(
@@ -214,7 +244,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "openai",
         "10.00",
         "50.00",
-        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
     _m(
@@ -223,7 +253,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "2.00",
         "12.00",
         notes="max output 128K tokens",
-        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
     _m(
@@ -231,7 +261,8 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "openai",
         "0.20",
         "1.20",
-        reasoning_efforts=OPENAI_56_REASONING_EFFORTS,
+        deprecated=True,
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
     _m("gpt-realtime-2.1", "openai", "32.00", "64.00", notes="realtime audio"),
@@ -249,6 +280,38 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         supports_temperature=False,
         pricing_unit="audio_minutes",
         audio_price_per_minute="0.0045",
+    ),
+    # ---- OpenAI image generation ----------------------------------------
+    # Billed as tokens like Gemini's image models, but at three rates rather
+    # than two: prompt text at 5.00, a reference image at 8.00, and the
+    # generated picture at 30.00. ``ImageUsage.input_image_tokens`` is what
+    # separates the first two; without it an edit is priced as if its
+    # reference photos had been prose.
+    _m(
+        "gpt-image-2.5-flare",
+        "openai",
+        "5.00",
+        "30.00",
+        notes="image generation and editing; quality tier multiplies output tokens "
+        "(a 768x1376 image is ~239 at medium and ~991 at high)",
+        supports_temperature=False,
+        modality="image",
+        image_input_price_per_mtok="8.00",
+        # The only output these models produce is the picture, so the two
+        # rates coincide. Declared anyway: the catalogue guard exists
+        # because an image priced at a text rate is off by twentyfold.
+        image_output_price_per_mtok="30.00",
+    ),
+    _m(
+        "gpt-image-2.5-sunburst",
+        "openai",
+        "5.00",
+        "30.00",
+        notes="same rates as flare, tuned for editing precision rather than speed",
+        supports_temperature=False,
+        modality="image",
+        image_input_price_per_mtok="8.00",
+        image_output_price_per_mtok="30.00",
     ),
     # ---- Groq (OpenAI-compatible ids, served by Groq) -------------------
     _m(

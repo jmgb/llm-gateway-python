@@ -66,7 +66,7 @@ def _request(model: str, *, temperature: float, fallback: str | None = None) -> 
 async def test_temperature_is_dropped_for_a_model_that_rejects_it() -> None:
     adapter = RecordingAdapter(_response("x"))
 
-    await _gateway(adapter).generate(_request("gpt-5.6-luna", temperature=0.2))
+    await _gateway(adapter).generate(_request("gpt-6-luna", temperature=0.2))
 
     assert adapter.requests[0].temperature is None
 

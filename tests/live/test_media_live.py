@@ -1,13 +1,13 @@
 """Real image and video generation, end to end, against three providers.
 
 Opt-in because it spends provider credits: roughly five cents for the Gemini
-image, USD 0.015 for the Chroma one, USD 0.20 for a five-second 480p clip on
-MiniMax H3, and an unpublished amount for the Kling clip, which Replicate bills
-by GPU time.
+image, USD 0.015 for the Chroma one, about USD 0.01 for the OpenAI edit at its
+cheapest tier, USD 0.20 for a five-second 480p clip on MiniMax H3, and an
+unpublished amount for the Kling clip, which Replicate bills by GPU time.
 
-    uv sync --extra gemini --extra wavespeed --extra replicate
+    uv sync --extra gemini --extra wavespeed --extra replicate --extra openai
     GEMINI_API_KEY=... WAVESPEED_API_KEY=... REPLICATE_API_TOKEN=... \
-      uv run pytest -m live tests/live/test_media_live.py -q -s
+    OPENAI_API_KEY=... uv run pytest -m live tests/live/test_media_live.py -q -s
 
 The tests are a chain. The first generates a lioness running across the savanna
 with `gemini-3.1-flash-lite-image`, the cheapest catalogued image model, and
@@ -64,10 +64,12 @@ from llm_gateway import (
 from llm_gateway.errors import ProviderNotInstalled
 from llm_gateway.factories import (
     create_gemini_client,
+    create_openai_client,
     create_replicate_client,
     create_wavespeed_client,
 )
 from llm_gateway.providers.gemini import GeminiAdapter
+from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.replicate import ReplicateAdapter
 from llm_gateway.providers.wavespeed import WaveSpeedAdapter
 
@@ -337,4 +339,64 @@ async def _run_kling_job(gateway: LLMGateway, frame: Path) -> None:
         f"kling video: model={result.job.model} status={result.job.status.value} "
         f"seconds={result.usage.seconds} resolution={result.usage.resolution} "
         f"cost={result.cost.measurement.value} url={video.url}"
+    )
+
+
+OPENAI_IMAGE_MODEL = "gpt-image-2.5-flare"
+OPENAI_IMAGE_SIZE = "1024x1024"
+OPENAI_IMAGE_QUALITY = "low"  # the cheapest tier; `high` is roughly four times it
+OPENAI_EDIT_PROMPT = (
+    "Keep this exact animal and its markings. Place it on a rocky ridge at dusk "
+    "with storm clouds breaking behind, photorealistic wildlife photography."
+)
+
+
+async def test_a_real_openai_edit_reports_its_two_input_rates_apart() -> None:
+    """The split only a live reply carries: a fake cannot invent input_tokens_details.
+
+    It also proves the edit endpoint accepts the file tuple the adapter builds.
+    A fake accepts any shape, so the multipart form is exactly the kind of
+    thing this suite exists to catch.
+    """
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        pytest.skip("OPENAI_API_KEY is not set")
+    source = _output_dir() / _IMAGE_FILENAME
+    if not source.exists():
+        pytest.skip(f"{source} does not exist; run the Gemini image test first")
+    try:
+        registry = ProviderRegistry()
+        registry.register(OpenAIAdapter(create_openai_client(api_key=key)), model_prefixes=())
+        gateway = LLMGateway(registry=registry)
+    except ProviderNotInstalled as absent:
+        pytest.skip(str(absent))
+
+    result = await gateway.generate_image(
+        ImageRequest(
+            model=OPENAI_IMAGE_MODEL,
+            prompt=OPENAI_EDIT_PROMPT,
+            image=ImageInput(data=source.read_bytes(), mime_type="image/png"),
+            size=OPENAI_IMAGE_SIZE,
+            quality=OPENAI_IMAGE_QUALITY,
+            source="live-media-integration",
+            timeout_policy=TimeoutPolicy(total_seconds=300.0),
+        )
+    )
+
+    image = result.images[0]
+    assert image.data, "OpenAI returned no image bytes"
+    assert result.usage.tokens is not None
+    # The reference photo is billed above the prompt, so the split must be
+    # reported for the cost to be anything other than UNAVAILABLE.
+    assert result.usage.input_image_tokens is not None
+    assert result.usage.input_image_tokens > 0
+    assert result.cost.measurement is CostMeasurement.ACTUAL
+    assert result.cost.amount_usd is not None and result.cost.amount_usd > 0
+
+    destination = _output_dir() / "live_openai_edit.png"
+    destination.write_bytes(image.data)
+    print(
+        f"\nOpenAI edit: {destination} "
+        f"({result.usage.input_image_tokens} image-input tokens, "
+        f"USD {result.cost.amount_usd})"
     )

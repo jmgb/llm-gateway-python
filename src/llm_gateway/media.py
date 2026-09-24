@@ -53,6 +53,22 @@ class ImageRequest:
     image: ImageInput | None = None
     """Present for an edit, absent for a generation. Not every provider edits."""
     aspect_ratio: str | None = None
+    size: str | None = None
+    """Output size as ``WIDTHxHEIGHT``, for providers that size a picture
+    explicitly instead of by ratio. Both exist because neither derives the
+    other without inventing a number: an aspect ratio names no pixels, and a
+    provider that takes only one of the two rejects the other rather than
+    guessing."""
+    quality: str | None = None
+    """The model's own quality tier, where it publishes them.
+
+    It belongs in the request because it is a price, not a preference: the
+    same 768x1376 picture is 239 output tokens on gpt-image-2.5 at ``medium``
+    and 991 at ``high``, so a caller that cannot state the tier cannot control
+    what it spends. Unstated, it is left to the provider — unlike a video
+    resolution, which is defaulted to the cheapest tier here because it comes
+    back unstated and could not otherwise be priced at all.
+    """
     timeout_policy: TimeoutPolicy = field(default_factory=TimeoutPolicy)
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy.disabled)
     fallback_policy: FallbackPolicy = field(default_factory=FallbackPolicy.disabled)
@@ -66,6 +82,10 @@ class ImageRequest:
             raise ValueError("an image prompt must be non-empty")
         if self.aspect_ratio is not None and not self.aspect_ratio.strip():
             raise ValueError("aspect ratio must be non-empty when provided")
+        if self.size is not None and not self.size.strip():
+            raise ValueError("size must be non-empty when provided")
+        if self.quality is not None and not self.quality.strip():
+            raise ValueError("quality must be non-empty when provided")
 
 
 @dataclass(frozen=True, slots=True)

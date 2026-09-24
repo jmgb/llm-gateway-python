@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import math
 from decimal import Decimal
 from types import SimpleNamespace
@@ -12,8 +13,10 @@ import pytest
 from llm_gateway import ImageInput, ImageRequest, VideoJob, VideoJobStatus, VideoRequest
 from llm_gateway.errors import ConfigurationError, ProviderError, RateLimitedError
 from llm_gateway.providers.gemini import GeminiAdapter
+from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.replicate import ReplicateAdapter
 from llm_gateway.providers.wavespeed import WaveSpeedAdapter
+from llm_gateway.usage import TokenUsage
 
 
 class Recorder:
@@ -989,3 +992,170 @@ class TestReplicateReportsWhatItActuallyMeasures:
         )
 
         assert update.usage.seconds is None
+
+
+class TestOpenAIImages:
+    """gpt-image bills three rates at once, so the usage split is the point."""
+
+    @staticmethod
+    def _reply(
+        *,
+        b64: str = "iVBORw==",
+        input_tokens: int | None = 1499,
+        image_tokens: int | None = 992,
+        text_tokens: int | None = 507,
+        output_tokens: int | None = 991,
+    ) -> SimpleNamespace:
+        usage = None
+        if input_tokens is not None:
+            usage = SimpleNamespace(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                input_tokens_details=SimpleNamespace(
+                    image_tokens=image_tokens,
+                    text_tokens=text_tokens,
+                    cached_tokens=None,
+                ),
+            )
+        return SimpleNamespace(
+            data=[SimpleNamespace(b64_json=b64, url=None)],
+            usage=usage,
+            output_format="png",
+        )
+
+    @staticmethod
+    def _client(generate: Any = None, edit: Any = None) -> SimpleNamespace:
+        return SimpleNamespace(images=SimpleNamespace(generate=generate, edit=edit))
+
+    async def test_it_generates_from_a_prompt_and_decodes_the_returned_bytes(self) -> None:
+        recorder = Recorder(self._reply())
+        client = self._client(generate=recorder)
+
+        response = await OpenAIAdapter(client).generate_image(
+            _request(model="gpt-image-2.5-flare"), model="gpt-image-2.5-flare"
+        )
+
+        assert response.images[0].data == base64.b64decode("iVBORw==")
+        assert response.images[0].mime_type == "image/png"
+        assert recorder.calls[0]["model"] == "gpt-image-2.5-flare"
+
+    async def test_it_sends_the_size_and_quality_the_caller_asked_for(self) -> None:
+        """Quality multiplies the bill fourfold, so it is never invented here."""
+        recorder = Recorder(self._reply())
+
+        await OpenAIAdapter(self._client(generate=recorder)).generate_image(
+            _request(model="gpt-image-2.5-flare", size="768x1376", quality="high"),
+            model="gpt-image-2.5-flare",
+        )
+
+        assert recorder.calls[0]["size"] == "768x1376"
+        assert recorder.calls[0]["quality"] == "high"
+
+    async def test_an_unstated_quality_is_left_to_the_provider(self) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenAIAdapter(self._client(generate=recorder)).generate_image(
+            _request(model="gpt-image-2.5-flare"), model="gpt-image-2.5-flare"
+        )
+
+        assert "quality" not in recorder.calls[0]
+        assert "size" not in recorder.calls[0]
+
+    async def test_a_source_image_goes_to_the_edit_endpoint(self) -> None:
+        edit = Recorder(self._reply())
+        generate = Recorder(self._reply())
+
+        await OpenAIAdapter(self._client(generate=generate, edit=edit)).generate_image(
+            _request(
+                model="gpt-image-2.5-sunburst",
+                image=ImageInput(data=b"\x89PNG", mime_type="image/png"),
+            ),
+            model="gpt-image-2.5-sunburst",
+        )
+
+        assert generate.calls == []
+        assert edit.calls[0]["image"] == ("image.png", b"\x89PNG", "image/png")
+
+    async def test_it_refuses_a_source_image_it_would_have_to_fetch(self) -> None:
+        adapter = OpenAIAdapter(self._client(edit=Recorder(self._reply())))
+
+        with pytest.raises(ConfigurationError, match="bytes"):
+            await adapter.generate_image(
+                _request(model="gpt-image-2.5-flare", image=ImageInput(url="https://x/y.png")),
+                model="gpt-image-2.5-flare",
+            )
+
+    async def test_it_refuses_an_aspect_ratio_it_cannot_send(self) -> None:
+        """Silently squaring a portrait is a bug the caller cannot see."""
+        adapter = OpenAIAdapter(self._client(generate=Recorder(self._reply())))
+
+        with pytest.raises(ConfigurationError, match="aspect ratio"):
+            await adapter.generate_image(
+                _request(model="gpt-image-2.5-flare", aspect_ratio="9:16"),
+                model="gpt-image-2.5-flare",
+            )
+
+    async def test_it_reports_the_image_share_of_the_input_tokens(self) -> None:
+        """Reference photos cost 8.00/Mtok and prompt text 5.00, so the split bills."""
+        client = self._client(generate=Recorder(self._reply()))
+
+        response = await OpenAIAdapter(client).generate_image(
+            _request(model="gpt-image-2.5-flare"), model="gpt-image-2.5-flare"
+        )
+
+        assert response.usage.images == 1
+        assert response.usage.input_image_tokens == 992
+        assert response.usage.tokens is not None
+        assert response.usage.tokens.input_tokens == 1499
+        assert response.usage.tokens.output_tokens == 991
+
+    async def test_usage_the_provider_did_not_report_stays_unknown(self) -> None:
+        client = self._client(generate=Recorder(self._reply(input_tokens=None)))
+
+        response = await OpenAIAdapter(client).generate_image(
+            _request(model="gpt-image-2.5-flare"), model="gpt-image-2.5-flare"
+        )
+
+        assert response.usage.input_image_tokens is None
+        assert response.usage.tokens == TokenUsage.unknown()
+
+    async def test_a_reply_carrying_no_image_is_a_failure(self) -> None:
+        client = self._client(generate=Recorder(SimpleNamespace(data=[], usage=None)))
+        adapter = OpenAIAdapter(client)
+
+        with pytest.raises(ProviderError, match="no image"):
+            await adapter.generate_image(
+                _request(model="gpt-image-2.5-flare"), model="gpt-image-2.5-flare"
+            )
+
+    async def test_a_provider_failure_is_classified_not_leaked(self) -> None:
+        error = RuntimeError("boom")
+        error.status_code = 429  # type: ignore[attr-defined]
+        client = self._client(generate=Recorder(error))
+        adapter = OpenAIAdapter(client)
+
+        with pytest.raises(RateLimitedError):
+            await adapter.generate_image(
+                _request(model="gpt-image-2.5-flare"), model="gpt-image-2.5-flare"
+            )
+
+
+@pytest.mark.parametrize("option", ["size", "quality"])
+@pytest.mark.parametrize(
+    ("adapter_factory", "model"),
+    [
+        (lambda: GeminiAdapter(SimpleNamespace()), "gemini-3.1-flash-image"),
+        (lambda: ReplicateAdapter(SimpleNamespace()), "black-forest-labs/flux-kontext-pro"),
+        (lambda: WaveSpeedAdapter(SimpleNamespace()), "wavespeed-ai/chroma"),
+    ],
+    ids=["gemini", "replicate", "wavespeed"],
+)
+async def test_an_option_a_provider_cannot_send_is_refused_not_dropped(
+    adapter_factory: Any, model: str, option: str
+) -> None:
+    """A silently dropped size returns the wrong picture and says nothing."""
+    with pytest.raises(ConfigurationError):
+        await adapter_factory().generate_image(
+            _request(model=model, **{option: "768x1376" if option == "size" else "high"}),
+            model=model,
+        )

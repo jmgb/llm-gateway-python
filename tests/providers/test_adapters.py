@@ -123,7 +123,7 @@ class TestOpenAIAdapter:
                     FileAttachment("file-audio-2"),
                 )
             ),
-            model="gpt-5.6-luna",
+            model="gpt-6-luna",
         )
 
         user = recorder.kwargs["input"][-1]

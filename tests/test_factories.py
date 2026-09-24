@@ -129,7 +129,7 @@ def test_build_registry_routes_known_model_families() -> None:
         groq_client=SimpleNamespace(),
     )
 
-    assert registry.resolve("gpt-5.6-luna").name == "openai"
+    assert registry.resolve("gpt-6-luna").name == "openai"
     assert registry.resolve("gemini-3.5-flash-lite").name == "gemini"
     assert registry.resolve("openai/gpt-oss-120b").name == "groq"
 
@@ -184,7 +184,7 @@ class TestOpenRouter:
         """Two OpenAI-shaped clients used to collide on the name `openai`."""
         registry = self._registry()
 
-        assert registry.resolve("gpt-5.6-luna").name == "openai"
+        assert registry.resolve("gpt-6-luna").name == "openai"
         assert registry.resolve("gemini-3.5-flash").name == "gemini"
         assert registry.resolve("openai/gpt-oss-120b").name == "groq"
 

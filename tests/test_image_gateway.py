@@ -156,7 +156,7 @@ async def test_a_text_model_cannot_be_sent_through_the_image_path() -> None:
     adapter = RecordingImageAdapter("openai", _response())
 
     with pytest.raises(ConfigurationError, match="generate"):
-        await _gateway(adapter).generate_image(_request(model="gpt-5.6-luna"))
+        await _gateway(adapter).generate_image(_request(model="gpt-6-luna"))
 
 
 async def test_a_provider_without_image_support_fails_configuration_not_silently() -> None:

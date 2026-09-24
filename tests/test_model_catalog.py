@@ -23,19 +23,51 @@ from llm_gateway.models import (
 
 
 class TestIdentity:
-    def test_gpt_6_astra_matches_gpt_5_6_sol_except_identity_and_prices(self) -> None:
-        sol = lookup_model("gpt-5.6-sol")
-        astra = lookup_model("gpt-6-astra")
-
+    def test_the_gpt_6_reasoning_models_differ_only_in_identity_and_price(self) -> None:
+        """One family, one set of request options: only the rates separate them."""
+        sol = lookup_model("gpt-6-sol")
         assert sol is not None
-        assert astra is not None
-        assert astra == replace(
-            sol,
-            id="gpt-6-astra",
-            input_usd_per_mtok=Decimal("10"),
-            output_usd_per_mtok=Decimal("50"),
-        )
-        assert resolve_provider("gpt-6-astra") == "openai"
+
+        rates = {
+            "gpt-6-astra": (Decimal("10"), Decimal("50")),
+            "gpt-6-luna": (Decimal("0.10"), Decimal("0.50")),
+        }
+        for model_id, (input_price, output_price) in rates.items():
+            info = lookup_model(model_id)
+
+            assert info is not None
+            assert info == replace(
+                sol,
+                id=model_id,
+                input_usd_per_mtok=input_price,
+                output_usd_per_mtok=output_price,
+            )
+            assert resolve_provider(model_id) == "openai"
+
+    def test_gpt_6_sol_and_luna_are_priced_at_their_published_rates(self) -> None:
+        expected = {
+            "gpt-6-sol": ("2", "10"),
+            "gpt-6-luna": ("0.10", "0.50"),
+        }
+
+        for model_id, (input_price, output_price) in expected.items():
+            info = lookup_model(model_id)
+
+            assert info is not None
+            assert info.provider == "openai"
+            assert info.input_usd_per_mtok == Decimal(input_price)
+            assert info.output_usd_per_mtok == Decimal(output_price)
+            assert info.supports_temperature is False
+            assert info.deprecated is False
+
+    def test_the_superseded_gpt_5_6_pair_still_resolves_but_is_deprecated(self) -> None:
+        """A pinned caller must keep routing; no fallback may derive its way back."""
+        for model_id in ("gpt-5.6-sol", "gpt-5.6-luna"):
+            info = lookup_model(model_id)
+
+            assert info is not None
+            assert info.deprecated is True
+            assert resolve_provider(model_id) == "openai"
 
     def test_current_openrouter_models_are_catalogued_with_their_published_rates(self) -> None:
         expected = {
@@ -173,7 +205,7 @@ class TestIdentity:
 
     def test_a_known_model_reports_its_provider(self) -> None:
         gemini = lookup_model("gemini-3.5-flash-lite")
-        openai = lookup_model("gpt-5.6-luna")
+        openai = lookup_model("gpt-6-luna")
 
         assert gemini is not None and gemini.provider == "gemini"
         assert openai is not None and openai.provider == "openai"
@@ -222,7 +254,7 @@ class TestIdentity:
     def test_reasoning_efforts_are_declared_per_model(self) -> None:
         openai_expected = ("none", "low", "medium", "high", "xhigh", "max")
 
-        for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        for model_id in ("gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"):
             info = lookup_model(model_id)
             assert info is not None
             assert info.provider == "openai"
@@ -296,11 +328,11 @@ class TestProviderRouting:
 
 class TestBuiltinPrices:
     def test_luna_uses_the_current_published_rates(self) -> None:
-        luna = lookup_model("gpt-5.6-luna")
+        luna = lookup_model("gpt-6-luna")
 
         assert luna is not None
-        assert luna.input_usd_per_mtok == Decimal("0.20")
-        assert luna.output_usd_per_mtok == Decimal("1.20")
+        assert luna.input_usd_per_mtok == Decimal("0.10")
+        assert luna.output_usd_per_mtok == Decimal("0.50")
 
     def test_terra_uses_the_current_published_rates(self) -> None:
         terra = lookup_model("gpt-5.6-terra")
@@ -455,8 +487,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-09-03.2"
-    PRICE_FINGERPRINT = "44a73db6b41dc733ba167b6742d9803e11f1f6a181e910508b54d3e29c7f9505"
+    PRICED_AT_VERSION = "2026-09-24"
+    PRICE_FINGERPRINT = "6b3902c51c4a4dbdfa4af1ef85f147629bc6c72d8be1e77972eca5f88c9bb385"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -478,6 +510,7 @@ class TestPricesAndVersionMoveTogether:
             f"\t{(info.audio_usd_per_minute or Decimal('0')).quantize(micro)}"
             f"\t{(info.image_usd_per_image or Decimal('0')).quantize(micro)}"
             f"\t{(info.image_output_usd_per_mtok or Decimal('0')).quantize(micro)}"
+            f"\t{(info.image_input_usd_per_mtok or Decimal('0')).quantize(micro)}"
             f"\t{(info.video_usd_per_second or Decimal('0')).quantize(micro)}"
             f"\t{by_resolution(info)}"
             for info in MODEL_CATALOG.values()
@@ -499,7 +532,7 @@ class TestDeclaredRequestOptions:
     """What a model accepts is declared, never inferred from its id."""
 
     def test_the_openai_56_family_declares_that_it_rejects_temperature(self) -> None:
-        for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        for model_id in ("gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"):
             info = lookup_model(model_id)
             assert info is not None
             assert info.supports_temperature is False, model_id
@@ -514,7 +547,7 @@ class TestDeclaredRequestOptions:
 
 class TestModelInfo:
     def test_it_has_no_unused_alias_surface(self) -> None:
-        info = lookup_model("gpt-5.6-luna")
+        info = lookup_model("gpt-6-luna")
 
         assert info is not None
         assert not hasattr(info, "aliases")

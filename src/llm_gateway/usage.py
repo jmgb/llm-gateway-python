@@ -113,11 +113,22 @@ class ImageUsage:
     images: int | None = None
     tokens: TokenUsage | None = None
     """Only providers that bill image generation as tokens report this."""
+    input_image_tokens: int | None = None
+    """The share of ``tokens.input_tokens`` billed at the provider's image-input
+    rate, where that rate differs from the text one.
+
+    OpenAI charges 8.00/Mtok for a reference photo and 5.00 for prompt text, and
+    a reference photo is around 992 tokens against a prompt's 507 — so an edit
+    priced entirely at the text rate understates by a sixth. Gemini charges one
+    rate for both and leaves this ``None``.
+    """
     partial_aggregate: bool = False
 
     def __post_init__(self) -> None:
         if self.images is not None and self.images < 0:
             raise ValueError("image count must be non-negative")
+        if self.input_image_tokens is not None and self.input_image_tokens < 0:
+            raise ValueError("image input token count must be non-negative")
 
     @classmethod
     def unknown(cls) -> ImageUsage:
@@ -140,6 +151,7 @@ class ImageUsage:
         return ImageUsage(
             images=images,
             tokens=tokens,
+            input_image_tokens=_add(self.input_image_tokens, other.input_image_tokens),
             partial_aggregate=not (self.complete and other.complete),
         )
 

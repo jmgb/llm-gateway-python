@@ -104,6 +104,12 @@ LLMGateway.poll_video()        ← status now, clip and cost when terminal
     └── VideoJobProviderAdapter.poll_video()
 ```
 
+One provider can serve more than one of these seams: the OpenAI adapter speaks
+the Responses API for `generate()`, the Audio API for `transcribe()` and the
+Images API for `generate_image()`. It stays one adapter under one name because
+the registry maps a provider to exactly one, and the catalogue's `modality`
+decides which seam a given model id may enter.
+
 Four operations, four request types, four accounting seams — and the catalogue
 decides which one a model belongs to. An audio, image or video model sent
 through `generate()` raises instead of degrading: a transcription priced as

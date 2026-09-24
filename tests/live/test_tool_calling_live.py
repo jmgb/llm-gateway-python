@@ -44,7 +44,7 @@ from llm_gateway.providers.openai import OpenAIAdapter
 
 pytestmark = pytest.mark.live
 
-OPENAI_MODEL = "gpt-5.6-luna"
+OPENAI_MODEL = "gpt-6-luna"
 GROQ_MODEL = "openai/gpt-oss-120b"
 
 WEATHER = FunctionTool(

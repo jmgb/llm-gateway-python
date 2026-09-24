@@ -19,7 +19,11 @@ from llm_gateway.errors import ConfigurationError, ProviderError
 from llm_gateway.media import GeneratedImage, ImageRequest, ProviderImageResponse
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
-from llm_gateway.providers.validation import reject_file_attachments, reject_tools
+from llm_gateway.providers.validation import (
+    reject_file_attachments,
+    reject_tools,
+    reject_unsendable_image_options,
+)
 from llm_gateway.usage import ImageUsage, TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
@@ -78,6 +82,7 @@ class GeminiAdapter:
         inline data is treated as a provider failure: returning it as an empty
         success is how a caller ends up showing the user nothing.
         """
+        reject_unsendable_image_options(request, provider=self.name)
         parts: list[dict[str, Any]] = [{"text": request.prompt}]
         if request.image is not None:
             if request.image.data is None:

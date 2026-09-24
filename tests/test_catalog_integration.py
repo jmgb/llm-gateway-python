@@ -49,7 +49,7 @@ class TestRoutingUsesTheCatalogue:
         )
 
         assert registry.resolve("gemini-3.8-flash").name == "gemini"
-        assert registry.resolve("gpt-5.6-sol").name == "openai"
+        assert registry.resolve("gpt-6-sol").name == "openai"
         assert registry.resolve("openai/gpt-oss-120b").name == "groq"
 
 
@@ -120,7 +120,7 @@ class TestCatalogueAwareFallback:
             FallbackPolicy.cheaper_than("model-that-does-not-exist")
 
     def test_deprecated_models_are_never_proposed_as_fallback(self) -> None:
-        policy = FallbackPolicy.cheaper_than("gpt-5.6-sol", limit=5)
+        policy = FallbackPolicy.cheaper_than("gpt-6-sol", limit=5)
 
         for model in policy.models:
             info = lookup_model(model)
