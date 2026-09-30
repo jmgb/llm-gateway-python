@@ -15,6 +15,9 @@ consumer pins an immutable tag and upgrades through its own pull request.
   tokens) and `anthropic/claude-opus-5.5` (`$4` / `$20`). Both declare
   `supports_temperature=False`, since Claude 5.5 answers a non-default
   `temperature` with HTTP 400. `CATALOG_VERSION` moves to `2026-09-30`.
+- OpenAI's `gpt-6.1-sol` (`$2` input / `$10` output per 1M tokens), the latest
+  Sol generation, with the same reasoning efforts as `gpt-6-sol` and
+  `supports_temperature=False`.
 
 ### Deprecated
 

@@ -29,6 +29,7 @@ class TestIdentity:
         assert sol is not None
 
         rates = {
+            "gpt-6.1-sol": (Decimal("2"), Decimal("10")),
             "gpt-6-astra": (Decimal("10"), Decimal("50")),
             "gpt-6-luna": (Decimal("0.10"), Decimal("0.50")),
         }
@@ -47,6 +48,7 @@ class TestIdentity:
     def test_gpt_6_sol_and_luna_are_priced_at_their_published_rates(self) -> None:
         expected = {
             "gpt-6-sol": ("2", "10"),
+            "gpt-6.1-sol": ("2", "10"),
             "gpt-6-luna": ("0.10", "0.50"),
         }
 
@@ -255,7 +257,7 @@ class TestIdentity:
     def test_reasoning_efforts_are_declared_per_model(self) -> None:
         openai_expected = ("none", "low", "medium", "high", "xhigh", "max")
 
-        for model_id in ("gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"):
+        for model_id in ("gpt-6-sol", "gpt-6.1-sol", "gpt-5.6-terra", "gpt-6-luna"):
             info = lookup_model(model_id)
             assert info is not None
             assert info.provider == "openai"
@@ -489,7 +491,7 @@ class TestPricesAndVersionMoveTogether:
     """
 
     PRICED_AT_VERSION = "2026-09-30"
-    PRICE_FINGERPRINT = "d90d09d061b46e4ec2c117170308fc9dcc5b43be25a7e11fb0fb6a39b2520773"
+    PRICE_FINGERPRINT = "f0fcdbdf2cf85e64cc471f962f0084276d52d67db08960704270d41aed50d4d4"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -533,7 +535,7 @@ class TestDeclaredRequestOptions:
     """What a model accepts is declared, never inferred from its id."""
 
     def test_the_openai_56_family_declares_that_it_rejects_temperature(self) -> None:
-        for model_id in ("gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"):
+        for model_id in ("gpt-6-sol", "gpt-6.1-sol", "gpt-5.6-terra", "gpt-6-luna"):
             info = lookup_model(model_id)
             assert info is not None
             assert info.supports_temperature is False, model_id

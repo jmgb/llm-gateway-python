@@ -674,8 +674,9 @@ catalog protocol yourself. See
 [`docs/pricing.md`](docs/pricing.md).
 
 The catalogue's current OpenAI reasoning family is `gpt-6-astra` at `$10`
-input / `$50` output per million tokens, `gpt-6-sol` at `$2` / `$10` and
-`gpt-6-luna` at `$0.10` / `$0.50`. All three share one set of routing and
+input / `$50` output per million tokens, `gpt-6.1-sol` and `gpt-6-sol` at
+`$2` / `$10`, and `gpt-6-luna` at `$0.10` / `$0.50`. All four share one set of
+routing and
 request-option rules: reasoning efforts are `none`, `low`, `medium`, `high`,
 `xhigh` and `max`; `temperature` is omitted because the models reject it; and
 `verbosity` is forwarded when requested. The `gpt-5.6-sol` and `gpt-5.6-luna`

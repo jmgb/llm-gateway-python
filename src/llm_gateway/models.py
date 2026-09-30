@@ -219,6 +219,15 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
+    # Latest Sol generation: same rates as gpt-6-sol, cheaper cache reads.
+    _m(
+        "gpt-6.1-sol",
+        "openai",
+        "2.00",
+        "10.00",
+        reasoning_efforts=OPENAI_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
     _m(
         "gpt-6-luna",
         "openai",
