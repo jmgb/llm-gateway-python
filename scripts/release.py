@@ -79,6 +79,8 @@ def _ensure_ready() -> None:
 
 
 def _checks() -> None:
+    # Keep in step with scripts/ci-local.sh, which runs the same checks per
+    # supported Python in isolated environments.
     commands = (
         ("uv", "run", "--offline", "pytest"),
         ("uv", "lock", "--check", "--offline"),

@@ -221,4 +221,7 @@ made during validation. Deleting a ref does not run checks.
 The hook runs Python 3.11 and 3.13 in ignored `.venv-ci-*` environments,
 without provider extras. Each version runs lint, formatting, mypy, offline tests,
 the build and the artifact audit. To check one interpreter:
-`bash scripts/ci-local.sh 3.11`. No release is created or uploaded.
+`bash scripts/ci-local.sh 3.11`. To run only what a diff needs,
+`bash scripts/ci-local.sh changed [base]` (documentation-only diffs run nothing;
+every step runs even if one fails, and the summary lists each with its log).
+No release is created or uploaded.
