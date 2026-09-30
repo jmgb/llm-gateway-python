@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-09-30"
+CATALOG_VERSION = "2026-09-30.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -211,11 +211,14 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # These OpenAI reasoning models reject `temperature`: reasoning replaces it,
     # and sending it fails the whole call. A fallback onto one of these must not
     # inherit it.
+    # Superseded by gpt-6.1-sol at the same rates (cheaper cache reads).
+    # Kept resolvable for pinned callers; deprecated so no fallback picks it.
     _m(
         "gpt-6-sol",
         "openai",
         "2.00",
         "10.00",
+        deprecated=True,
         reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
@@ -561,9 +564,10 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m(
         "~anthropic/claude-opus-latest",
         "openrouter",
-        "5.00",
-        "25.00",
+        "4.00",
+        "20.00",
         notes="floating alias; prefer a pinned id",
+        supports_temperature=False,
     ),
     _m(
         "~deepseek/deepseek-v4-flash-latest",

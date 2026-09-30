@@ -9,6 +9,18 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Changed
+
+- `~anthropic/claude-opus-latest` now resolves to Claude Opus 5.5 on OpenRouter:
+  priced at `$4` input / `$20` output per 1M tokens (was `$5` / `$25`) and
+  declares `supports_temperature=False`. `CATALOG_VERSION` moves to
+  `2026-09-30.1`.
+
+### Deprecated
+
+- `gpt-6-sol` is superseded by `gpt-6.1-sol` at the same rates. It stays
+  routable for pinned callers but no fallback chain derives its way back to it.
+
 ## [0.19.0] — 2026-09-30
 
 ### Added

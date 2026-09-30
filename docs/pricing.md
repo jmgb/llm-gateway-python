@@ -43,7 +43,7 @@ The current OpenAI reasoning models in the catalogue are priced as follows:
 |---|---:|---:|
 | `gpt-6-astra` | `$10` | `$50` |
 | `gpt-6.1-sol` | `$2` | `$10` |
-| `gpt-6-sol` | `$2` | `$10` |
+| `gpt-6-sol` (deprecated) | `$2` | `$10` |
 | `gpt-5.6-terra` | `$2` | `$12` |
 | `gpt-6-luna` | `$0.10` | `$0.50` |
 | `gpt-5.6-sol` (deprecated) | `$5` | `$30` |

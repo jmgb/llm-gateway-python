@@ -25,11 +25,12 @@ from llm_gateway.models import (
 class TestIdentity:
     def test_the_gpt_6_reasoning_models_differ_only_in_identity_and_price(self) -> None:
         """One family, one set of request options: only the rates separate them."""
-        sol = lookup_model("gpt-6-sol")
+        sol = lookup_model("gpt-6.1-sol")
         assert sol is not None
+        # gpt-6-sol is the superseded twin: same everything, only deprecated.
+        assert lookup_model("gpt-6-sol") == replace(sol, id="gpt-6-sol", deprecated=True)
 
         rates = {
-            "gpt-6.1-sol": (Decimal("2"), Decimal("10")),
             "gpt-6-astra": (Decimal("10"), Decimal("50")),
             "gpt-6-luna": (Decimal("0.10"), Decimal("0.50")),
         }
@@ -47,7 +48,6 @@ class TestIdentity:
 
     def test_gpt_6_sol_and_luna_are_priced_at_their_published_rates(self) -> None:
         expected = {
-            "gpt-6-sol": ("2", "10"),
             "gpt-6.1-sol": ("2", "10"),
             "gpt-6-luna": ("0.10", "0.50"),
         }
@@ -64,7 +64,7 @@ class TestIdentity:
 
     def test_the_superseded_gpt_5_6_pair_still_resolves_but_is_deprecated(self) -> None:
         """A pinned caller must keep routing; no fallback may derive its way back."""
-        for model_id in ("gpt-5.6-sol", "gpt-5.6-luna"):
+        for model_id in ("gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-sol"):
             info = lookup_model(model_id)
 
             assert info is not None
@@ -77,7 +77,7 @@ class TestIdentity:
             "anthropic/claude-opus-5.5": ("4", "20", False),
             "x-ai/grok-4.5": ("2", "6", True),
             "~anthropic/claude-sonnet-latest": ("2", "10", False),
-            "~anthropic/claude-opus-latest": ("5", "25", True),
+            "~anthropic/claude-opus-latest": ("4", "20", False),
             "~deepseek/deepseek-v4-flash-latest": ("0.09", "0.18", True),
             "~moonshotai/kimi-latest": ("2.9", "14", True),
             "qwen/qwen3.8-max": ("2", "6", True),
@@ -490,8 +490,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-09-30"
-    PRICE_FINGERPRINT = "f0fcdbdf2cf85e64cc471f962f0084276d52d67db08960704270d41aed50d4d4"
+    PRICED_AT_VERSION = "2026-09-30.1"
+    PRICE_FINGERPRINT = "a2fb580423e04b7eb1d288986dccec6bd85789f2929ef49088b10136297f6bc4"
 
     @staticmethod
     def _fingerprint() -> str:
