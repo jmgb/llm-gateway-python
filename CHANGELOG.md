@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-09-30
+
 ### Added
 
 - OpenRouter's `anthropic/claude-sonnet-5.5` (`$2` input / `$10` output per 1M
