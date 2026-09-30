@@ -42,13 +42,14 @@ The current OpenAI reasoning models in the catalogue are priced as follows:
 | Model | Input / 1M tokens | Output / 1M tokens |
 |---|---:|---:|
 | `gpt-6-astra` | `$10` | `$50` |
+| `gpt-6.1-sol` | `$2` | `$10` |
 | `gpt-6-sol` | `$2` | `$10` |
 | `gpt-5.6-terra` | `$2` | `$12` |
 | `gpt-6-luna` | `$0.10` | `$0.50` |
 | `gpt-5.6-sol` (deprecated) | `$5` | `$30` |
 | `gpt-5.6-luna` (deprecated) | `$0.20` | `$1.20` |
 
-The three `gpt-6` models share one set of request options: they accept the same
+The four `gpt-6` models share one set of request options: they accept the same
 reasoning efforts, drop `temperature`, and forward `verbosity` to OpenAI.
 
 The deprecated `gpt-5.6` pair is still resolvable, so a caller pinned to either
