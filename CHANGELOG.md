@@ -9,6 +9,17 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- OpenRouter's `anthropic/claude-sonnet-5.5` (`$2` input / `$10` output per 1M
+  tokens) and `anthropic/claude-opus-5.5` (`$4` / `$20`). Both declare
+  `supports_temperature=False`, since Claude 5.5 answers a non-default
+  `temperature` with HTTP 400. `CATALOG_VERSION` moves to `2026-09-30`.
+
+### Deprecated
+
+- `anthropic/claude-sonnet-4.6` is marked deprecated; it stays routable.
+
 ## [0.18.0] — 2026-09-24
 
 ### Added

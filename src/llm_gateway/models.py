@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-09-24"
+CATALOG_VERSION = "2026-09-30"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -524,7 +524,22 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("google/gemini-3.5-flash-lite", "openrouter", "0.30", "2.50"),
     _m("google/gemini-3.6-flash", "openrouter", "1.50", "7.50", deprecated=True),
     _m("google/gemini-3.8-flash", "openrouter", "0.75", "3.75"),
-    _m("anthropic/claude-sonnet-4.6", "openrouter", "3.00", "15.00"),
+    _m("anthropic/claude-sonnet-4.6", "openrouter", "3.00", "15.00", deprecated=True),
+    # Claude 5.5 rejects a non-default temperature/top_p with HTTP 400.
+    _m(
+        "anthropic/claude-sonnet-5.5",
+        "openrouter",
+        "2.00",
+        "10.00",
+        supports_temperature=False,
+    ),
+    _m(
+        "anthropic/claude-opus-5.5",
+        "openrouter",
+        "4.00",
+        "20.00",
+        supports_temperature=False,
+    ),
     _m("x-ai/grok-4.5", "openrouter", "2.00", "6.00"),
     _m(
         "~anthropic/claude-sonnet-latest",

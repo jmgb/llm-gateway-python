@@ -71,7 +71,8 @@ class TestIdentity:
 
     def test_current_openrouter_models_are_catalogued_with_their_published_rates(self) -> None:
         expected = {
-            "anthropic/claude-sonnet-4.6": ("3", "15", True),
+            "anthropic/claude-sonnet-5.5": ("2", "10", False),
+            "anthropic/claude-opus-5.5": ("4", "20", False),
             "x-ai/grok-4.5": ("2", "6", True),
             "~anthropic/claude-sonnet-latest": ("2", "10", False),
             "~anthropic/claude-opus-latest": ("5", "25", True),
@@ -487,8 +488,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-09-24"
-    PRICE_FINGERPRINT = "6b3902c51c4a4dbdfa4af1ef85f147629bc6c72d8be1e77972eca5f88c9bb385"
+    PRICED_AT_VERSION = "2026-09-30"
+    PRICE_FINGERPRINT = "d90d09d061b46e4ec2c117170308fc9dcc5b43be25a7e11fb0fb6a39b2520773"
 
     @staticmethod
     def _fingerprint() -> str:
