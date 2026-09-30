@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-30
+
 ### Changed
 
 - `~anthropic/claude-opus-latest` now resolves to Claude Opus 5.5 on OpenRouter:
