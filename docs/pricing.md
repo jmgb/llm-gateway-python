@@ -64,7 +64,7 @@ back onto the dearer generation now that `gpt-6-luna` is the floor.
 | Value | Meaning |
 |---|---|
 | `ACTUAL` | Every billable dimension was reported by the provider and priced |
-| `ESTIMATED` | A **lower bound**: something billable was missing or unpriced |
+| `ESTIMATED` | **Not fully measured**: something billable was missing or unpriced, which makes it a lower bound, or was priced from a requested figure rather than a reported one |
 | `UNAVAILABLE` | No amount could be computed. **Not** the same as free |
 
 An unknown cost is never rendered as `USD 0`. "Free" and "unknown" are
@@ -88,7 +88,7 @@ Providers disagree here, so each adapter normalises at its boundary:
 | OpenAI (Responses) | `output_tokens_details.reasoning_tokens`, already inside `output_tokens` | passed through |
 | OpenAI (Images) | no reasoning; `input_tokens_details` splits text from image input | split kept in `ImageUsage.input_image_tokens` |
 | OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through |
-| Gemini | `thoughts_token_count`, **outside** `candidates_token_count` | folded into `output_tokens` |
+| Gemini | `thoughts_token_count`, **outside** `candidates_token_count`, which is omitted when zero | folded into `output_tokens`; a missing candidate count is derived from `total_token_count` minus prompt, thoughts and tool-use prompt |
 | AssemblyAI | no token usage; duration belongs to the audio contract | kept out of token pricing |
 | Replicate | no token usage; images are billed per run | kept out of token pricing |
 | WaveSpeed | no token usage; images are billed per image, video per second | kept out of token pricing |
@@ -97,6 +97,17 @@ Adding the breakdown back on top of the total is a real bug this package had:
 at a thinking effort where reasoning dominates the visible answer, it
 overstated cost by roughly 1.5–2×. If you implement your own `PriceCatalog`,
 price `usage.billable_output_tokens` and do not add `reasoning_tokens` yourself.
+
+## Cached input
+
+Providers that cache prompts report the cached share of the input, and
+`TokenUsage.cached_input_tokens` carries it. It is **not priced at a cheaper
+rate**: the catalogue declares one input rate per model, and OpenAI and Gemini
+already count cached tokens inside `input_tokens`, so the whole input is priced
+at the full rate. On a cache-heavy workload the amount therefore overstates the
+invoice, while still reading `ACTUAL`. A `PriceCatalog` of your own can price
+`cached_input_tokens` at the provider's cache-read rate if that difference
+matters to you.
 
 ## Retries and fallbacks are billed
 
@@ -127,8 +138,11 @@ explicit upgrade.
 
 1. Edit the entry in `src/llm_gateway/models.py`.
 2. Bump `CATALOG_VERSION`.
-3. Note it in `CHANGELOG.md`.
-4. Tag a release.
+3. Repin `PRICED_AT_VERSION` and `PRICE_FINGERPRINT` in
+   `TestPricesAndVersionMoveTogether` (`tests/test_model_catalog.py`), which
+   fails until a moved rate comes with a new version.
+4. Note it in `CHANGELOG.md`.
+5. Tag a release.
 
 Never delete a model that consumers might still call — mark it
 `deprecated=True`. Deleting it turns a priced call into an `UNAVAILABLE` one,
@@ -300,7 +314,7 @@ figure rather than a measurement nobody took.
 Replicate bills Wan by GPU time, which no per-second table predicts and which
 the prediction does not report. The catalogue therefore carries the model with
 no rate at all and its cost is `UNAVAILABLE` — the same answer the image
-catalogue gives for `prunaai/p-image`, and for the same reason: an invented
+catalogue gives for `bytedance/seedream-4`, and for the same reason: an invented
 number is worse than an admitted gap. Applications with a measured
 cost-per-clip supply a `VideoPriceCatalog` of their own.
 
@@ -312,7 +326,15 @@ and recorded through `VideoUsageSink`.
 `submit_video()` records nothing: at that point the clip does not exist, so any
 amount would be invented. Neither does a poll that finds the job still running
 — a job polled ten times is billed once. The poll that finds a terminal state
-is the one that prices what was produced and writes the usage record.
+is the one that prices what was produced and writes the usage record; a job
+passed in already terminal is read back without being recorded again.
+
+Two failures are recorded where they happen instead. A submission that only
+succeeded on a retry or a fallback records the attempts before it as a failed
+call, since a timed-out `predictions.create` may still have started a paid
+prediction that nothing will ever poll. And a job the provider reports as
+succeeded with no video is recorded as a billable failure before the poll
+raises.
 
 That record carries the `request_id` and `source` of the original
 `VideoRequest`, because the job travels them itself. A video is billed minutes
@@ -323,4 +345,6 @@ the one operation here whose spend could not be attributed.
 Replicate measures the clip it produced and returns it in the prediction's
 `metrics`, so `VideoUsage.seconds` is actual usage rather than the duration
 somebody requested, and `model_variant` gives back the tier that really ran.
-A prediction that reports no metrics leaves the length unknown — never zero.
+A prediction that reports no variant — Seedance does not — is priced at the
+resolution its own input carries, mapped back through the model's tiers. A
+prediction that reports no metrics leaves the length unknown — never zero.

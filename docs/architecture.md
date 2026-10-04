@@ -61,7 +61,7 @@ LLMRequest
 LLMGateway.generate()          ← retries, fallback, attempts, aggregation
     │
     ├── ProviderRegistry       ← model id → adapter
-    ├── PriceCatalog (port)    ← injected by the application
+    ├── PriceCatalog (port)    ← built-in prices by default, or injected
     ├── UsageSink   (port)     ← injected, no-op by default
     ├── EventSink   (port)
     └── AlertSink   (port)
@@ -140,7 +140,11 @@ error at the seam instead of a request that hangs.
 Accounting follows the clip, not the call: a submission records nothing,
 because no video exists yet and any amount would be invented. Intermediate
 polls record nothing either — a job polled ten times is billed once. Only the
-poll that finds a terminal state writes to the usage sink.
+poll that finds a terminal state writes to the usage sink, and a job handed in
+already terminal is not recorded again, so the caller stores the job each poll
+returns. The exception is a submission that succeeded only after earlier
+attempts failed: those may have left paid predictions running, so they are
+recorded as a failure at once rather than never.
 
 ### An option left unset must not be the expensive one
 
@@ -293,7 +297,8 @@ request payloads and occasionally credentials. The original is preserved as
 
 ## Extension without inversion
 
-Ports are protocols with no-op defaults. The package never imports an
+Ports are protocols with defaults: the sinks do nothing, and the price
+catalogues use the built-in, versioned table. The package never imports an
 application to resolve one — the application constructs the gateway and hands
 in what it wants.
 

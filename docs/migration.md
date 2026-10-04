@@ -91,6 +91,15 @@ Each consumer pins an immutable tag, so rolling back is a lock change. During
 release: pinning protects you from a bad upgrade, not from a design you have
 not exercised in production yet.
 
+## Notes for specific shapes
+
+- **A second layer over the facade** (e.g. a runner module) must migrate too;
+  migrating the service alone leaves the real callers uncovered.
+- **A facade inside a very large module** should be extracted to its own module
+  before its callers are touched, so the diff stays reviewable.
+- **Comparison experiments** must pin the same model on both sides and fail
+  loudly if the two diverge, or the comparison silently stops being one.
+
 ## Upgrading from 0.6 to 0.7
 
 Two changes need a look before the pin moves.
@@ -196,15 +205,6 @@ except AllAttemptsFailed as error:
     log.error("no model answered", reason=error.last_error_message)
 ```
 
-## Notes for specific shapes
-
-- **A second layer over the facade** (e.g. a runner module) must migrate too;
-  migrating the service alone leaves the real callers uncovered.
-- **A facade inside a very large module** should be extracted to its own module
-  before its callers are touched, so the diff stays reviewable.
-- **Comparison experiments** must pin the same model on both sides and fail
-  loudly if the two diverge, or the comparison silently stops being one.
-
 ## Upgrading to 0.15.0
 
 **Breaking for callers that name `gemini-3.7-flash` or
@@ -226,3 +226,29 @@ Nothing to change, and prefer it over `0.15.0`. That release carried an
 unreleased bump of the `openai` floor to `>=3.3`, which no consumer pinned to
 `openai<3` could resolve; `0.15.1` restores `>=2.54,<4`. The catalogue and the
 rename from `Upgrading to 0.15.0` are identical in both.
+
+## Upgrading past 0.20
+
+Five behaviours change, each toward refusing or recording what used to pass
+silently:
+
+- **Reasoning effort adapts to the nearest supported level**, not to `medium`.
+  A caller sending `none` to Gemini 3 Pro now gets `low` (cheaper than before);
+  one sending `max` to Groq GPT-OSS now gets `high` (dearer than before).
+- **`MODEL_CATALOG` is read-only.** Code that assigned into it to reprice a
+  model must pass `builtin_price_catalog(overrides=..., version=...)` instead.
+- **A catalogued model without its provider's client raises
+  `UnknownModelError`** rather than routing by another provider's prefix. A
+  registry built with only a Groq client no longer sends OpenRouter's
+  `qwen/...` ids to Groq; register the OpenRouter client to keep calling them.
+  An adapter of your own that serves catalogued ids — an Azure wrapper over
+  `gpt-*`, say — must be registered under the catalogue's provider name
+  (`openai`), not a name of its own.
+- **Store the `VideoJob` each poll returns.** A job passed to `poll_video()`
+  already terminal is read back without being recorded again, so a worker and
+  a webhook handler polling the same row bill the clip once. Writing a status
+  into the row yourself — from a webhook payload, say — makes the gateway take
+  the job as already billed.
+- **`ResponseFormat.JSON_OBJECT` requires an object.** A reply that parses to a
+  number, a boolean or a list is now an output-parsing failure, billed and
+  handed to the fallback like any other unusable answer.

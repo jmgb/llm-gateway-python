@@ -9,6 +9,120 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- `NullAudioPriceCatalog` is exported, like the other three `Null*PriceCatalog`
+  classes.
+
+### Changed
+
+- **Cost-affecting:** a reasoning effort the target model does not support now
+  becomes the nearest one it does, the cheaper of two equally near, instead of
+  always `medium`. `none` on Gemini 3 Pro used to be billed as `medium` and is
+  now `low`; `max` on Groq GPT-OSS is now `high`.
+- `MODEL_CATALOG` is a read-only mapping. Repricing an entry in place changed it
+  for every gateway in the process; negotiated rates go through
+  `builtin_price_catalog(overrides=..., version=...)`.
+- `create_openai_client`, `create_openrouter_client` and `create_groq_client`
+  build their SDK clients with `max_retries=0`. Those SDKs retried twice inside
+  one gateway attempt, so the retries were invisible to `execution.attempts` and
+  to the cost while spending the attempt's timeout. `RetryPolicy` is now the
+  only retry layer; the README asks the same of a client built by hand.
+- Schemas described in the prompt (Groq, OpenRouter) keep their declared field
+  order instead of being sorted alphabetically.
+- The OpenAI adapter sends function tools with an explicit `"strict": false`, so
+  their parameters reach the model exactly as declared.
+- Image, video and transcription fallback alerts carry `error_type`,
+  `error_message`, `failure_phase` and `failures`, like the text alert, so an
+  operator sees why the requested model was left.
+- A transcription plan naming a model that is not audio-priced raises
+  `ConfigurationError` before anything is sent, as image and video plans
+  already did, instead of failing after the first model was paid for.
+- The package declares and is tested against Python 3.14.
+- **Breaking for custom registrations:** a catalogued model whose provider has
+  no adapter registered under that exact name raises `UnknownModelError`
+  instead of falling through to another provider's prefix. Groq's `qwen`
+  caught OpenRouter's `qwen/qwen3.8-max` and sent it to the wrong API at the
+  wrong price; an adapter of your own serving catalogued ids must register
+  under the catalogue's provider name. A Gemini generation other than 3 is
+  refused however the prefixes are set.
+
+### Fixed
+
+- An attempt still in flight when `timeout_policy.total_seconds` runs out is
+  now recorded as a billable `ProviderTimeoutError` attempt. The provider
+  already had the request, yet the call used to report `0 attempt(s)` and
+  account for nothing it may have been invoiced for. The failure's usage
+  record also states the real latency instead of `0`.
+- A backoff pause longer than what is left of the total budget is no longer
+  slept into the deadline: the model's turn ends there, the fallback still gets
+  its own, and an exhausted call reports the error that stopped it — the rate
+  limit, say — instead of a bare budget timeout.
+- A `TimeoutError` raised by an application's own sink after a successful call
+  is no longer mistaken for the budget expiring, which recorded the call a
+  second time as failed — in text, image, video and transcription calls alike.
+  Usage is recorded before the fallback alert, so an alert hook that fails
+  cannot leave a paid call unrecorded.
+- Every adapter keeps the SDK's exception as `__cause__` of the typed error it
+  raises, as documented; it was being discarded, leaving nothing to debug with.
+- An exception an adapter failed to map is classified like any provider error
+  and recorded as a failed, billable attempt — an unknown charge is not a known
+  zero — so the fallback still gets its turn instead of the call crashing with
+  earlier billable attempts unrecorded.
+- `ResponseFormat.JSON_OBJECT` refuses a reply that parses to anything but an
+  object (`42`, `true`, a list) as an output-parsing failure, so the fallback
+  gets its turn.
+- Two tool calls sharing one correlation id fail the attempt, rather than
+  surfacing later as a continuation the request contract refuses.
+- JSON recovery tries both the outermost `{...}` and `[...]` spans of a reply
+  padded with prose, so `[{"a": 1}, {"b": 2}]` is no longer misread as two
+  sibling objects and rejected.
+- Adapters no longer raise a bare `ValueError` on an inconsistent usage payload:
+  a negative count is recorded as unreported and a reasoning breakdown larger
+  than the output is dropped, so the billed attempt is still accounted for.
+- Gemini derives a missing `candidates_token_count` from `total_token_count`, so
+  thinking that consumed `max_output_tokens` is no longer lost from the cost.
+  Its `-latest` aliases now receive the requested reasoning effort, its finish
+  reason reads `STOP` rather than `FinishReason.STOP`, and a schema it cannot
+  render fails locally instead of as a billable provider error.
+- Groq reports cached prompt tokens, as OpenRouter already did.
+- OpenAI requests no longer fail with HTTP 400 for a generic Pydantic schema
+  name such as `Page[Item]`, a discriminated union (`oneOf` is sent as `anyOf`),
+  or a function tool with optional parameters. A recursive model whose
+  self-reference carries a description no longer overflows the stack.
+- Connection failures (`APIConnectionError`, `ConnectError`,
+  `RemoteProtocolError`) are classified as transient `ServiceUnavailableError`,
+  so `RetryPolicy.transient()` retries them.
+- `TimeoutPolicy` and `RetryPolicy` reject NaN and infinite durations, which
+  failed every call or slept the whole budget away, and
+  `FallbackPolicy.cheaper_than` rejects a `limit` below one.
+- `builtin_price_catalog(overrides=...)` rejects a blank `version`, which used to
+  label custom rates with `CATALOG_VERSION`.
+- A video submission that succeeds only after a failed attempt records that
+  attempt: a timed-out `predictions.create` may have started a paid prediction
+  that nothing would ever poll. A failure raised after a Replicate prediction
+  was created now counts as billable, and an unrecognised status at creation is
+  read as queued rather than retried into a second paid prediction.
+- Polling a video job that is already terminal no longer records its usage
+  again, so a worker and a webhook handler polling the same stored job bill it
+  once; store the job each poll returns. A submission never hands back a
+  terminal job, so one that finished instantly is still billed by its first
+  poll. A job reported as succeeded with no video is recorded as a billable
+  failure before raising.
+- Seedance 2.5 clips polled through Replicate are priced: with no
+  `model_variant` reported, the resolution comes from the prediction's input.
+  Merging video usage keeps a resolution only one side knows.
+- Replicate's `aborted` status (deadline passed before the prediction started)
+  maps to `CANCELLED` instead of failing every poll. WaveSpeed treats its
+  documented `deleted` status as terminal.
+- WaveSpeed refuses `VideoRequest.webhook_url` instead of silently dropping it.
+  WaveSpeed and AssemblyAI ride out two consecutive transient errors on a
+  status read instead of abandoning a running, billed job — whose retry would
+  then pay for a second one.
+- Image, video and transcription calls cut off by the total budget report
+  their real latency, and empty image or video replies keep the usage the
+  provider reported on the failed attempt.
+
 ## [0.20.0] — 2026-09-30
 
 ### Changed
@@ -75,7 +189,7 @@ consumer pins an immutable tag and upgrades through its own pull request.
 - `gpt-5.6-sol` and `gpt-5.6-luna` are now `deprecated`. They stay in the
   catalogue — a caller pinned to either id keeps routing and keeps being
   priced — but `FallbackPolicy.cheaper_than` no longer derives a chain onto
-  them, which it otherwise would, and at four to five times the rate of the
+  them, which it otherwise would, and at two to three times the rate of the
   `gpt-6` model that supersedes each.
 - `OPENAI_56_REASONING_EFFORTS` is now `OPENAI_REASONING_EFFORTS`. The tuple was
   never 5.6-specific and `gpt-6` publishes the same six values; the old name

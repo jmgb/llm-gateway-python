@@ -81,7 +81,7 @@ To try an unreleased commit, the PEP 508 git form works everywhere and pins a
 tag or revision:
 
 ```bash
-pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.5.0"
+pip install "neutral-llm-gateway[gemini] @ git+https://github.com/jmgb/llm-gateway-python.git@v0.20.0"
 ```
 
 ## Use
@@ -154,7 +154,7 @@ from dataclasses import replace
 from llm_gateway import FunctionTool, LLMRequest, Message, ToolResult
 
 request = LLMRequest(
-    model="gpt-5.6",
+    model="gpt-6-luna",
     messages=(Message("user", "What is the weather in Madrid?"),),
     tools=(
         FunctionTool(
@@ -346,10 +346,12 @@ later. Waiting inside one `await` would mean a four-minute request timeout and
 no way to use the webhook, so the same `VideoRequest` takes a second route:
 
 ```python
-from llm_gateway import LLMGateway, VideoJob, VideoJobStatus, VideoRequest
+from llm_gateway import ImageInput, LLMGateway, VideoJob, VideoJobStatus, VideoRequest
 from llm_gateway.factories import build_registry, create_replicate_client
 
-gateway = LLMGateway(registry=build_registry(replicate_client=create_replicate_client()))
+gateway = LLMGateway(
+    registry=build_registry(replicate_client=create_replicate_client(api_key=my_key))
+)
 
 job = await gateway.submit_video(
     VideoRequest(
@@ -399,6 +401,12 @@ provider from blocking the worker that polled it.
 
 Nothing is billed until the job is terminal. A submission records no usage —
 the clip does not exist yet — and a job polled ten times is recorded once.
+Store `result.job` after each poll: a job passed in already terminal is read
+back but not recorded again, which is what keeps a worker and a webhook handler
+that both poll it from billing the clip twice. The one exception to "a
+submission records nothing" is a submission that only succeeded on a retry or
+a fallback: the attempts before it may have created predictions that run and
+are charged, so they are recorded as a failure straight away.
 
 Three Replicate video models are catalogued, and the adapter translates each
 one from its published input schema rather than a shared guess:
@@ -480,7 +488,9 @@ and video siblings) raise with `.attempts`, plus `.last_error` and
 ### The `llm_fallback_used` alert
 
 When a call succeeds on a fallback model, `AlertSink.alert` receives
-`"llm_fallback_used"` and this payload:
+`"llm_fallback_used"` and this payload. Image, video and transcription
+fallbacks send the same fields under `"llm_image_fallback_used"`,
+`"llm_video_fallback_used"` and `"llm_audio_fallback_used"`:
 
 ```python
 {
@@ -490,7 +500,7 @@ When a call succeeds on a fallback model, `AlertSink.alert` receives
     # The headline: the failure that ended the requested model's turn.
     # All three are None if the requested model never failed.
     "error_type": "RateLimitedError",
-    "error_message": "Rate limit reached for gpt-oss-120b: 30000 TPM",
+    "error_message": "provider returned HTTP 429 (rate_limit_exceeded)",
     "failure_phase": "provider",
     # Every failed attempt, oldest first. One entry per attempt, so a retry
     # appears twice; successful attempts are absent, and the list is never
@@ -501,7 +511,7 @@ When a call succeeds on a fallback model, `AlertSink.alert` receives
             "model": "openai/gpt-oss-120b",
             "provider": "groq",
             "error_type": "RateLimitedError",
-            "error_message": "Rate limit reached for gpt-oss-120b: 30000 TPM",
+            "error_message": "provider returned HTTP 429 (rate_limit_exceeded)",
             "failure_phase": "provider",
         },
         # ... one more for the retry, one for each further model that failed
@@ -533,9 +543,13 @@ what was sent.
 
 ## Extending
 
-Ports are optional and default to no-op: `UsageSink`, `EventSink`, `AlertSink`,
-`AudioUsageSink`, `PriceCatalog` and `AudioPriceCatalog`. Implement what you
-need; the package will not reach into your application to find them.
+Ports are optional. The sinks — `UsageSink`, `AudioUsageSink`,
+`ImageUsageSink`, `VideoUsageSink`, `EventSink` and `AlertSink` — default to
+no-op. The price catalogues — `PriceCatalog`, `AudioPriceCatalog`,
+`ImagePriceCatalog` and `VideoPriceCatalog` — default to the built-in,
+versioned prices; pass your own for negotiated rates, or a `Null*PriceCatalog`
+to price nothing. Implement what you need; the package will not reach into
+your application to find them.
 
 Adding to the public API follows the **two-consumer rule**: nothing is promoted
 into the core until two distinct applications need it. Until then it belongs in
@@ -555,6 +569,14 @@ that application's local adapter.
 
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
+
+The `openai` and `groq` SDKs retry on their own by default, twice, inside what
+the gateway sees as one attempt: those retries may be billed but appear in
+neither `result.execution.attempts` nor the cost, and they spend the attempt's
+timeout before your `RetryPolicy` gets a turn. The `create_*_client` factories
+build them with `max_retries=0`; a client you build yourself — OpenRouter's
+included — should do the same, so the gateway's policy is the only retry layer
+and every attempt is accounted for.
 
 A provider that declares `structured_outputs=False` has no API field that binds
 the answer to a shape, so its adapter states the requested schema in the system
@@ -593,20 +615,22 @@ awaiting `generate_video()`, Replicate through `submit_video()` and
 application can ask whether it must poll before committing to a design.
 
 Request options are adapted per model before each API attempt. A model that
-rejects `temperature` — the OpenAI 5.6 family — never receives it, including
-when it is reached through a fallback that inherited it from another model.
+rejects `temperature` — OpenAI's reasoning models, and Claude 5.5 on
+OpenRouter — never receives it, including when it is reached through a
+fallback that inherited it from another model.
 
-Reasoning effort is checked the same way. OpenAI 5.6
-models support `none`, `low`, `medium`, `high`, `xhigh`, and `max`; Gemini 3
-Flash supports `minimal`, `low`, `medium`, and `high`; Gemini 3 Pro and Groq
-GPT-OSS support `low`, `medium`, and `high`. If a fallback cannot honour the
-requested effort, the gateway uses `medium` when available and otherwise omits
-the reasoning option.
+Reasoning effort is checked the same way. OpenAI's reasoning models support
+`none`, `low`, `medium`, `high`, `xhigh`, and `max`; Gemini 3 Flash supports
+`minimal`, `low`, `medium`, and `high`; Gemini 3 Pro and Groq GPT-OSS support
+`low`, `medium`, and `high`. If a model cannot honour the requested effort,
+the gateway sends the nearest one it supports, choosing the cheaper of two
+equally near — `none` becomes `low` on Gemini 3 Pro, `max` becomes `high` —
+and omits the option for a model that declares no efforts at all.
 
 `LLMRequest.verbosity` (`low`, `medium`, `high`) asks for a shorter or longer
 answer, which is not what `max_output_tokens` does: that one truncates an answer
 already being written and pays for every token up to the cut. OpenAI declares
-`verbosity=True` and sends it for the `gpt-5` families; an adapter without the
+`verbosity=True` and sends it for the `gpt-5` and `gpt-6` families; an adapter without the
 capability has no field for it, so a fallback that inherits the option is
 neither charged for it nor broken by it.
 
@@ -699,26 +723,24 @@ supported with their own capability and cost contracts.
 - [`docs/migration.md`](docs/migration.md) — adopting it behind an existing function
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — what belongs here, and the non-negotiables
 
-## Releasing without GitHub Actions
+## Releasing
 
-The local release runner keeps versioning and publication independent from
-GitHub Actions minutes. Preview a release first:
-
-```bash
-uv run --offline python scripts/release.py --version 0.6.0 --dry-run
-```
-
-Prepare the release locally, including tests, the version in `pyproject.toml`
-and `uv.lock`, the changelog, a release commit, and an annotated tag:
+Releases are prepared locally and published to PyPI by GitHub Actions through
+Trusted Publishing, so no upload token exists on the normal path. Preview,
+then prepare, tag and push:
 
 ```bash
-uv run --offline python scripts/release.py --version 0.6.0
+uv run --offline python scripts/release.py --version X.Y.Z --dry-run
+uv run --offline python scripts/release.py --version X.Y.Z --push
+gh workflow run "Manual Release" -f ref=vX.Y.Z
 ```
 
-Add `--push` to push `main` and the tag. Add `--publish` as well to publish
-the matching wheel and sdist with `uv publish` and create the GitHub Release;
-the latter requires GitHub CLI authentication and `UV_PUBLISH_TOKEN`.
-`--publish` implies a real external release and therefore requires `--push`.
+Both runs first require a clean `main` equal to `origin/main` and a tag that
+exists neither locally nor on `origin` — the dry run included, so it needs the
+network. The runner then bumps the version in `pyproject.toml` and `uv.lock`,
+promotes the changelog, runs the checks, builds, audits the artifacts, and
+creates the release commit and the annotated tag; a failed or interrupted run
+restores the files it touched. The workflow checks out the tag, builds, audits and uploads.
 
 Every built artifact is audited before it is uploaded, and the release is
 refused if the archive contains an unexpected dotfile or a credential-shaped
@@ -726,9 +748,9 @@ name. What reaches a package index cannot be recalled — the file is mirrored
 within minutes — so the check runs between the build and the upload, which is
 the last moment it is still worth anything.
 
-The local runner is the normal publisher when Actions minutes are unavailable.
-The GitHub workflow is manual only; use one publisher per version to avoid
-uploading the same PyPI files twice.
+`--publish` uploads from the local machine with `UV_PUBLISH_TOKEN` instead and
+creates the GitHub Release; it is the fallback for when Actions is unavailable.
+Use one publisher per version: PyPI refuses a second upload of the same file.
 
 ## Development
 
