@@ -65,6 +65,8 @@ _JOB_STATUS = {
     "succeeded": VideoJobStatus.SUCCEEDED,
     "failed": VideoJobStatus.FAILED,
     "canceled": VideoJobStatus.CANCELLED,
+    # Replicate's deadline passed before the prediction started running.
+    "aborted": VideoJobStatus.CANCELLED,
 }
 
 
@@ -150,7 +152,7 @@ class ReplicateAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         images = _images(output)
         if not images:
@@ -196,7 +198,7 @@ class ReplicateAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         job_id = str(getattr(prediction, "id", "") or "")
         if not job_id:
@@ -207,7 +209,10 @@ class ReplicateAdapter:
             id=job_id,
             model=model,
             provider=self.name,
-            status=_status(getattr(prediction, "status", None)),
+            # Lenient here, unlike a poll: the prediction exists and is billed,
+            # and raising over a status word would orphan it — then a retry
+            # pays for a second one. The first poll still refuses the word.
+            status=_JOB_STATUS.get(str(getattr(prediction, "status", None)), VideoJobStatus.QUEUED),
         )
 
     async def poll_video(self, job: VideoJob) -> ProviderVideoJobUpdate:
@@ -217,7 +222,7 @@ class ReplicateAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         status = _status(getattr(prediction, "status", None))
         if status is not VideoJobStatus.SUCCEEDED:
@@ -239,7 +244,9 @@ class ReplicateAdapter:
                 # real invoice at nothing.
                 seconds=_measured_seconds(metrics),
                 videos=len(videos),
-                resolution=_measured_resolution(metrics, job.model),
+                resolution=_resolution_that_ran(
+                    metrics, getattr(prediction, "input", None), job.model
+                ),
             ),
         )
 
@@ -263,23 +270,29 @@ def _measured_seconds(metrics: Any) -> float | None:
     return seconds if seconds > 0 and math.isfinite(seconds) else None
 
 
-def _measured_resolution(metrics: Any, model: str) -> str | None:
+def _resolution_that_ran(metrics: Any, request_input: Any, model: str) -> str | None:
     """The tier that actually ran, back in the package's own spelling.
 
     Kling reports ``model_variant`` — its own name for the tier, the same one
-    the request sent as ``mode``. Translating it back is what lets a
-    resolution-keyed price table find the rate that was really charged. A
-    variant the model does not declare stays unknown rather than being mapped
-    to the nearest guess.
+    the request sent as ``mode`` — and a measurement outranks a request, so a
+    variant it reports decides even when it is one nobody declared. Seedance
+    reports no variant at all, and it is priced by resolution alone; without
+    a fallback every clip would cost ``UNAVAILABLE``. The prediction's own
+    input is that fallback: the key is the one the model's schema declares,
+    so the tier sent is the tier generated. Either way, a value the model does
+    not declare stays unknown rather than being mapped to the nearest guess.
     """
-    if not isinstance(metrics, dict):
-        return None
-    variant = metrics.get("model_variant")
     shape = _VIDEO_SHAPES.get(model)
-    if not isinstance(variant, str) or shape is None or shape.resolutions is None:
+    if shape is None or shape.resolutions is None:
+        return None
+    if isinstance(metrics, dict) and "model_variant" in metrics:
+        spelled = metrics.get("model_variant")
+    elif isinstance(request_input, dict) and shape.resolution_field is not None:
+        spelled = request_input.get(shape.resolution_field)
+    else:
         return None
     for neutral, provider_name in shape.resolutions.items():
-        if provider_name == variant:
+        if provider_name == spelled:
             return neutral
     return None
 

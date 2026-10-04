@@ -8,7 +8,12 @@ from typing import Any
 import pytest
 
 from llm_gateway import AudioInput, TranscriptionRequest
-from llm_gateway.errors import ConfigurationError, ProviderError, RateLimitedError
+from llm_gateway.errors import (
+    ConfigurationError,
+    ProviderError,
+    RateLimitedError,
+    ServiceUnavailableError,
+)
 from llm_gateway.providers.assemblyai import AssemblyAIAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
@@ -259,3 +264,56 @@ class TestAssemblyAITranscription:
                 ),
                 model="assemblyai-universal-2",
             )
+
+
+class _Unavailable(Exception):
+    status_code = 503
+
+
+class TestAssemblyAIPollingSurvivesABlip:
+    """One failed status read must not abandon a transcript that is running and billed."""
+
+    async def test_one_transient_error_on_a_status_read_is_ridden_out(self) -> None:
+        class FlakyClient(FakeAssemblyAIClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self.failures = 1
+
+            async def get(self, path: str) -> dict[str, Any]:
+                if self.failures:
+                    self.failures -= 1
+                    self.gets.append(path)
+                    raise _Unavailable
+                return await super().get(path)
+
+        client = FlakyClient()
+
+        response = await AssemblyAIAdapter(client, poll_interval_seconds=0).transcribe(
+            _request(
+                model="assemblyai-universal-2",
+                audio=AudioInput(url="https://storage.example/acta.m4a"),
+            ),
+            model="assemblyai-universal-2",
+        )
+
+        assert response.text == "acta transcrita"
+        assert len(client.posts) == 1
+
+    async def test_a_run_of_transient_status_errors_still_gives_up(self) -> None:
+        class DownClient(FakeAssemblyAIClient):
+            async def get(self, path: str) -> dict[str, Any]:
+                self.gets.append(path)
+                raise _Unavailable
+
+        client = DownClient()
+
+        with pytest.raises(ServiceUnavailableError):
+            await AssemblyAIAdapter(client, poll_interval_seconds=0).transcribe(
+                _request(
+                    model="assemblyai-universal-2",
+                    audio=AudioInput(url="https://storage.example/acta.m4a"),
+                ),
+                model="assemblyai-universal-2",
+            )
+
+        assert 1 < len(client.gets) < 10

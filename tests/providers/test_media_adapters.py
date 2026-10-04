@@ -11,7 +11,13 @@ from typing import Any
 import pytest
 
 from llm_gateway import ImageInput, ImageRequest, VideoJob, VideoJobStatus, VideoRequest
-from llm_gateway.errors import ConfigurationError, ProviderError, RateLimitedError
+from llm_gateway.errors import (
+    AuthenticationError,
+    ConfigurationError,
+    ProviderError,
+    RateLimitedError,
+    ServiceUnavailableError,
+)
 from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.replicate import ReplicateAdapter
@@ -415,6 +421,107 @@ class TestWaveSpeedVideo:
                 model="wavespeed-ai/minimax-h3/image-to-video",
             )
 
+    async def test_an_awaited_generation_refuses_a_webhook_rather_than_dropping_it(self) -> None:
+        """A caller who thinks it registered a webhook waits for a call that never comes."""
+        client = FakeWaveSpeedVideoClient({"status": "completed", "outputs": ["https://x/y.mp4"]})
+
+        with pytest.raises(ConfigurationError, match="webhook"):
+            await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+                _video_request(
+                    image=ImageInput(url="https://cdn.test/lion.png"),
+                    webhook_url="https://app.test/hooks/video",
+                ),
+                model="wavespeed-ai/minimax-h3/image-to-video",
+            )
+
+        assert client.posted == []
+
+    async def test_one_transient_error_on_a_status_read_does_not_abandon_a_paid_task(
+        self,
+    ) -> None:
+        """Giving up on a running task pays for it, and a retry pays for another."""
+
+        class FlakyPollClient(FakeWaveSpeedVideoClient):
+            def __init__(self) -> None:
+                super().__init__({"status": "completed", "outputs": ["https://x/y.mp4"]})
+                self.failures = 1
+
+            async def get(self, path: str) -> dict[str, Any]:
+                if self.failures:
+                    self.failures -= 1
+                    self.got.append(path)
+                    raise _http_error(503)
+                return await super().get(path)
+
+        client = FlakyPollClient()
+
+        response = await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+            _video_request(image=ImageInput(url="https://cdn.test/lion.png")),
+            model="wavespeed-ai/minimax-h3/image-to-video",
+        )
+
+        assert response.videos[0].url == "https://x/y.mp4"
+        assert len(client.posted) == 1
+
+    async def test_a_run_of_transient_status_errors_still_gives_up(self) -> None:
+        class DownPollClient(FakeWaveSpeedVideoClient):
+            async def get(self, path: str) -> dict[str, Any]:
+                self.got.append(path)
+                raise _http_error(503)
+
+        client = DownPollClient()
+
+        with pytest.raises(ServiceUnavailableError):
+            await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+                _video_request(image=ImageInput(url="https://cdn.test/lion.png")),
+                model="wavespeed-ai/minimax-h3/image-to-video",
+            )
+
+        assert 1 < len(client.got) < 10
+
+    async def test_a_permanent_status_error_is_raised_at_once(self) -> None:
+        class RejectedKeyClient(FakeWaveSpeedVideoClient):
+            async def get(self, path: str) -> dict[str, Any]:
+                self.got.append(path)
+                raise _http_error(401)
+
+        client = RejectedKeyClient()
+
+        with pytest.raises(AuthenticationError):
+            await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+                _video_request(image=ImageInput(url="https://cdn.test/lion.png")),
+                model="wavespeed-ai/minimax-h3/image-to-video",
+            )
+
+        assert len(client.got) == 1
+
+    async def test_a_status_it_does_not_know_keeps_the_paid_task_polled(self) -> None:
+        """WaveSpeed's documentation says to keep polling any status that is not
+        terminal; refusing one would abandon a task that is still being billed."""
+        client = FakeWaveSpeedVideoClient(
+            {"status": "queued"},
+            {"status": "completed", "outputs": ["https://cdn.test/hunt.mp4"]},
+        )
+
+        response = await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+            _video_request(image=ImageInput(url="https://cdn.test/lion.png")),
+            model="wavespeed-ai/minimax-h3/image-to-video",
+        )
+
+        assert response.videos
+        assert len(client.got) == 2
+
+    async def test_a_deleted_task_is_a_terminal_failure(self) -> None:
+        client = FakeWaveSpeedVideoClient({"status": "deleted"})
+
+        with pytest.raises(ProviderError, match="deleted"):
+            await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+                _video_request(image=ImageInput(url="https://cdn.test/lion.png")),
+                model="wavespeed-ai/minimax-h3/image-to-video",
+            )
+
+        assert len(client.got) == 1
+
 
 WAN = "wan-video/wan-2.2-5b-fast"
 
@@ -454,6 +561,12 @@ class FakePredictions:
         if isinstance(prediction, Exception):
             raise prediction
         return prediction
+
+
+def _http_error(status: int) -> Exception:
+    error = Exception("provider said no")
+    error.status_code = status  # type: ignore[attr-defined]
+    return error
 
 
 def _prediction(status: str = "starting", **kwargs: Any) -> SimpleNamespace:
@@ -558,6 +671,17 @@ class TestReplicateVideoSubmission:
         with pytest.raises(ProviderError, match="prediction id"):
             await ReplicateAdapter(client).submit_video(_video_request(model=WAN), model=WAN)
 
+    async def test_an_unrecognised_status_at_creation_still_returns_the_job_it_created(
+        self,
+    ) -> None:
+        """Raising here orphans a paid prediction, and a retry would buy a second one."""
+        client = _client(_prediction("booting"))
+
+        job = await ReplicateAdapter(client).submit_video(_video_request(model=WAN), model=WAN)
+
+        assert job.id == "pred-1"
+        assert job.status is VideoJobStatus.QUEUED
+
     async def test_submission_failures_are_classified_structurally(self) -> None:
         failure = Exception("rate limited")
         failure.status_code = 429  # type: ignore[attr-defined]
@@ -608,6 +732,8 @@ class TestReplicateVideoPolling:
             ("succeeded", VideoJobStatus.SUCCEEDED),
             ("failed", VideoJobStatus.FAILED),
             ("canceled", VideoJobStatus.CANCELLED),
+            # Its deadline passed before it ever ran.
+            ("aborted", VideoJobStatus.CANCELLED),
         ],
     )
     async def test_every_replicate_status_maps_to_a_neutral_one(
@@ -971,6 +1097,57 @@ class TestReplicateReportsWhatItActuallyMeasures:
 
         assert update.usage.resolution is None
         assert update.usage.seconds == 5.0
+
+    async def test_seedance_reports_the_tier_it_was_asked_for_when_metrics_name_none(
+        self,
+    ) -> None:
+        """Seedance is priced by resolution alone, and reports no variant to read it from."""
+        client = _client(
+            _prediction(
+                "succeeded",
+                output="https://x/y.mp4",
+                metrics={"video_output_duration_seconds": 5},
+                input={"prompt": "a lion", "resolution": "480p"},
+            )
+        )
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=SEEDANCE, provider="replicate")
+        )
+
+        assert update.usage.resolution == "480p"
+
+    async def test_a_requested_tier_the_model_does_not_declare_is_not_guessed(self) -> None:
+        client = _client(
+            _prediction(
+                "succeeded",
+                output="https://x/y.mp4",
+                metrics={"video_output_duration_seconds": 5},
+                input={"resolution": "1080p"},
+            )
+        )
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=SEEDANCE, provider="replicate")
+        )
+
+        assert update.usage.resolution is None
+
+    async def test_a_measured_variant_outranks_the_requested_tier(self) -> None:
+        client = _client(
+            _prediction(
+                "succeeded",
+                output="https://x/y.mp4",
+                metrics={"video_output_duration_seconds": 5, "model_variant": "turbo"},
+                input={"mode": "standard"},
+            )
+        )
+
+        update = await ReplicateAdapter(client).poll_video(
+            VideoJob(id="pred-1", model=KLING, provider="replicate")
+        )
+
+        assert update.usage.resolution is None
 
     async def test_a_prediction_without_metrics_still_reports_the_video(self) -> None:
         """Missing metrics means unknown, which is not the same as broken."""

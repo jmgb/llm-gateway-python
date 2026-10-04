@@ -18,6 +18,13 @@ import math
 import time
 from dataclasses import replace
 
+from llm_gateway._attempts import (
+    aggregate,
+    elapsed_ms,
+    fallback_alert_fields,
+    new_attempt,
+    phase_of,
+)
 from llm_gateway.catalogs import builtin_image_price_catalog, builtin_video_price_catalog
 from llm_gateway.contracts import AttemptOutcome, FailurePhase
 from llm_gateway.errors import (
@@ -60,6 +67,7 @@ from llm_gateway.ports import (
 from llm_gateway.pricing import ImageCost, ImagePriceCatalog, VideoCost, VideoPriceCatalog
 from llm_gateway.providers.base import (
     ImageProviderAdapter,
+    ProviderAdapter,
     VideoJobProviderAdapter,
     VideoProviderAdapter,
 )
@@ -87,48 +95,59 @@ class ImageGateway:
 
     async def generate_image(self, request: ImageRequest) -> ImageResult:
         attempts: list[ImageAttempt] = []
+        started = time.perf_counter()
+        budget = asyncio.timeout(request.timeout_policy.total_seconds)
         try:
-            async with asyncio.timeout(request.timeout_policy.total_seconds):
-                return await self._run(request, attempts)
+            async with budget:
+                return await self._run(request, attempts, started=started)
         except TimeoutError:
-            self._report_failure(request, attempts)
+            # Only the budget expiring is the call running out of time; an
+            # application sink timing out after a success is not.
+            if not budget.expired():
+                raise
+            self._report_failure(request, attempts, started=started)
             raise AllImagesFailed(
                 f"the image call exceeded its total budget of "
                 f"{request.timeout_policy.total_seconds}s after {len(attempts)} attempt(s)",
                 attempts=tuple(attempts),
             ) from None
 
-    async def _run(self, request: ImageRequest, attempts: list[ImageAttempt]) -> ImageResult:
-        started = time.perf_counter()
+    async def _run(
+        self, request: ImageRequest, attempts: list[ImageAttempt], *, started: float
+    ) -> ImageResult:
         plan = [request.model, *request.fallback_policy.models]
+        adapters = {model: self._registry.resolve(model) for model in plan}
         for model in plan:
-            self._registry.resolve(model)
             _require_image_model(model)
 
         last_failure: LLMGatewayError | None = None
         for model in plan:
-            adapter = self._registry.resolve(model)
-            outcome = await self._attempt_model(request, model=model, attempts=attempts)
+            adapter = adapters[model]
+            outcome = await self._attempt_model(
+                request, model=model, adapter=adapter, attempts=attempts
+            )
             if isinstance(outcome, ProviderImageResponse):
-                elapsed_ms = int((time.perf_counter() - started) * 1000)
                 execution = ImageExecution(
                     requested_model=request.model,
                     model_used=outcome.model_used or model,
                     provider=adapter.name,
                     attempts=tuple(attempts),
-                    latency_ms=elapsed_ms,
+                    latency_ms=elapsed_ms(started),
                 )
                 usage, cost = _aggregate(attempts)
+                # Booked first: an alert hook that fails must not leave a paid
+                # call unrecorded.
+                self._record(request, execution, usage=usage, cost=cost, succeeded=True)
                 if execution.fallback_used:
                     self._alerts.alert(
                         "llm_image_fallback_used",
-                        {
-                            "requested_model": request.model,
-                            "model_used": execution.model_used,
-                            "request_id": request.request_id,
-                        },
+                        fallback_alert_fields(
+                            requested_model=request.model,
+                            model_used=execution.model_used,
+                            request_id=request.request_id,
+                            attempts=attempts,
+                        ),
                     )
-                self._record(request, execution, usage=usage, cost=cost, succeeded=True)
                 self._events.emit(
                     "llm_image_generation_succeeded",
                     _event_fields(request, execution, usage=usage, cost=cost),
@@ -152,14 +171,17 @@ class ImageGateway:
         request: ImageRequest,
         *,
         model: str,
+        adapter: ProviderAdapter,
         attempts: list[ImageAttempt],
     ) -> ProviderImageResponse | LLMGatewayError:
-        adapter = self._registry.resolve(model)
         policy = request.retry_policy
-        last_failure: LLMGatewayError | None = None
 
         for attempt_number in range(1, policy.max_attempts + 1):
             attempt_started = time.perf_counter()
+            # A failure costs an unknown amount unless the provider said what
+            # it used, which only a reply that arrived can do.
+            usage = ImageUsage.unknown()
+            cost = ImageCost.unavailable(pricing_version=self._prices.version)
             try:
                 if not isinstance(adapter, ImageProviderAdapter):
                     raise ConfigurationError(
@@ -167,10 +189,6 @@ class ImageGateway:
                     )
                 async with asyncio.timeout(request.timeout_policy.per_attempt_seconds):
                     response = await adapter.generate_image(request, model=model)
-                if not response.images:
-                    # An empty reply is a failure, not a successful call that
-                    # happened to produce nothing: the attempt was still billed.
-                    raise ProviderError(f"{adapter.name} returned no image")
             except TimeoutError as error:
                 failure: LLMGatewayError = ProviderTimeoutError(
                     f"image attempt exceeded {request.timeout_policy.per_attempt_seconds}s"
@@ -178,11 +196,12 @@ class ImageGateway:
                 failure.__cause__ = error
             except asyncio.CancelledError:
                 attempts.append(
-                    _record_attempt(
+                    new_attempt(
+                        ImageAttempt,
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
-                        outcome="failed",
+                        outcome=AttemptOutcome.FAILED,
                         usage=ImageUsage.unknown(),
                         cost=ImageCost.unavailable(pricing_version=self._prices.version),
                         started=attempt_started,
@@ -198,33 +217,39 @@ class ImageGateway:
             else:
                 usage = response.usage
                 cost = self._prices.estimate(model, usage)
-                attempts.append(
-                    _record_attempt(
-                        index=len(attempts) + 1,
-                        model=model,
-                        provider=adapter.name,
-                        outcome="succeeded",
-                        usage=usage,
-                        cost=cost,
-                        started=attempt_started,
+                if response.images:
+                    attempts.append(
+                        new_attempt(
+                            ImageAttempt,
+                            index=len(attempts) + 1,
+                            model=model,
+                            provider=adapter.name,
+                            outcome=AttemptOutcome.SUCCEEDED,
+                            usage=usage,
+                            cost=cost,
+                            started=attempt_started,
+                        )
                     )
-                )
-                return response
+                    return response
+                # An empty reply is a failure, not a successful call that
+                # happened to produce nothing. It was still billed, so what the
+                # provider reported using stays on the attempt.
+                failure = ProviderError(f"{adapter.name} returned no image")
 
-            last_failure = failure
             attempts.append(
-                _record_attempt(
+                new_attempt(
+                    ImageAttempt,
                     index=len(attempts) + 1,
                     model=model,
                     provider=adapter.name,
-                    outcome="failed",
-                    usage=ImageUsage.unknown(),
-                    cost=ImageCost.unavailable(pricing_version=self._prices.version),
+                    outcome=AttemptOutcome.FAILED,
+                    usage=usage,
+                    cost=cost,
                     started=attempt_started,
                     error_type=type(failure).__name__,
                     error_message=message_of(failure),
                     billable=isinstance(failure, ProviderError),
-                    failure_phase=_phase_of(failure),
+                    failure_phase=phase_of(failure),
                 )
             )
             if not policy.should_retry(failure, attempt_number=attempt_number):
@@ -233,24 +258,22 @@ class ImageGateway:
             if delay:
                 await asyncio.sleep(delay)
 
-        assert last_failure is not None
-        return last_failure
+        return failure
 
     def _report_failure(
         self,
         request: ImageRequest,
         attempts: list[ImageAttempt],
         *,
-        started: float | None = None,
+        started: float,
     ) -> None:
         usage, cost = _aggregate(attempts)
-        elapsed_ms = int((time.perf_counter() - started) * 1000) if started is not None else 0
         execution = ImageExecution(
             requested_model=request.model,
             model_used=attempts[-1].model if attempts else request.model,
             provider=attempts[-1].provider if attempts else "unknown",
             attempts=tuple(attempts),
-            latency_ms=elapsed_ms,
+            latency_ms=elapsed_ms(started),
         )
         self._record(request, execution, usage=usage, cost=cost, succeeded=False)
         self._events.emit(
@@ -285,53 +308,10 @@ def _require_image_model(model: str) -> None:
         raise ConfigurationError(f"{model!r} does not generate images; use LLMGateway.generate()")
 
 
-def _record_attempt(
-    *,
-    index: int,
-    model: str,
-    provider: str,
-    outcome: str,
-    usage: ImageUsage,
-    cost: ImageCost,
-    started: float,
-    error_type: str | None = None,
-    error_message: str | None = None,
-    billable: bool = True,
-    failure_phase: FailurePhase | None = None,
-) -> ImageAttempt:
-    return ImageAttempt(
-        index=index,
-        model=model,
-        provider=provider,
-        outcome=AttemptOutcome.SUCCEEDED if outcome == "succeeded" else AttemptOutcome.FAILED,
-        usage=usage,
-        cost=cost,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        error_type=error_type,
-        error_message=error_message,
-        billable=billable,
-        failure_phase=failure_phase,
-    )
-
-
-def _phase_of(failure: LLMGatewayError) -> FailurePhase:
-    if isinstance(failure, ConfigurationError):
-        return FailurePhase.CONFIGURATION
-    if isinstance(failure, ProviderTimeoutError):
-        return FailurePhase.TIMEOUT
-    return FailurePhase.PROVIDER
-
-
 def _aggregate(attempts: list[ImageAttempt]) -> tuple[ImageUsage, ImageCost]:
-    billable = [attempt for attempt in attempts if attempt.billable]
-    if not billable:
-        return ImageUsage.unknown(), ImageCost.unavailable()
-    usage = billable[0].usage
-    cost = billable[0].cost
-    for attempt in billable[1:]:
-        usage = usage.merge(attempt.usage)
-        cost = cost.merge(attempt.cost)
-    return usage, cost
+    return aggregate(
+        attempts, unknown_usage=ImageUsage.unknown(), unavailable_cost=ImageCost.unavailable()
+    )
 
 
 def _event_fields(
@@ -382,11 +362,17 @@ class VideoGateway:
 
     async def generate_video(self, request: VideoRequest) -> VideoResult:
         attempts: list[VideoAttempt] = []
+        started = time.perf_counter()
+        budget = asyncio.timeout(request.timeout_policy.total_seconds)
         try:
-            async with asyncio.timeout(request.timeout_policy.total_seconds):
-                return await self._run(request, attempts)
+            async with budget:
+                return await self._run(request, attempts, started=started)
         except TimeoutError:
-            self._report_failure(request, attempts)
+            # Only the budget expiring is the call running out of time; an
+            # application sink timing out after a success is not.
+            if not budget.expired():
+                raise
+            self._report_failure(request, attempts, started=started)
             raise AllVideosFailed(
                 f"the video call exceeded its total budget of "
                 f"{request.timeout_policy.total_seconds}s after {len(attempts)} attempt(s)",
@@ -401,10 +387,15 @@ class VideoGateway:
         """
         attempts: list[VideoAttempt] = []
         started = time.perf_counter()
+        budget = asyncio.timeout(request.timeout_policy.total_seconds)
         try:
-            async with asyncio.timeout(request.timeout_policy.total_seconds):
+            async with budget:
                 return await self._submit_video(request, attempts, started=started)
         except TimeoutError:
+            # Only the budget expiring is the call running out of time; an
+            # application sink timing out after a success is not.
+            if not budget.expired():
+                raise
             self._report_failure(
                 request,
                 attempts,
@@ -427,25 +418,50 @@ class VideoGateway:
         # Resolved up front, so a provider that cannot take a job at all says
         # so before the first request rather than after the last retry.
         plan = [request.model, *request.fallback_policy.models]
+        adapters = {model: _job_provider(self._registry.resolve(model)) for model in plan}
         for model in plan:
-            _require_job_provider(self._registry.resolve(model))
             _require_video_model(model)
 
         last_failure: LLMGatewayError | None = None
         for model in plan:
-            outcome = await self._attempt_submission(request, model=model, attempts=attempts)
+            outcome = await self._attempt_submission(
+                request, model=model, adapter=adapters[model], attempts=attempts
+            )
             if isinstance(outcome, VideoJob):
                 # Stamped here rather than in each adapter, so no provider can
                 # forget it and leave its clip's cost unattributable.
                 outcome = replace(outcome, request_id=request.request_id, source=request.source)
+                if outcome.status.is_terminal:
+                    # Only a poll bills a job, and a poll that is handed a
+                    # terminal job takes it as already billed. One that finished
+                    # before submission returned is therefore handed back as
+                    # queued, so its first poll is the one that records it.
+                    outcome = outcome.with_status(VideoJobStatus.QUEUED)
+                if any(attempt.billable for attempt in attempts):
+                    # The job that came back is billed by the poll that finishes
+                    # it; the failures before it never will be. A submission
+                    # that failed after reaching the provider may have left a
+                    # prediction running whose id nobody holds, so it is
+                    # recorded now, as the failure it was, rather than lost.
+                    usage, cost = _aggregate_video(attempts)
+                    self._record(
+                        request,
+                        self._failed_execution(request, attempts, started=started),
+                        usage=usage,
+                        cost=cost,
+                        succeeded=False,
+                    )
+                # After the record: an alert hook that fails must not leave
+                # those earlier, possibly paid, attempts unrecorded.
                 if outcome.model != request.model:
                     self._alerts.alert(
                         "llm_video_fallback_used",
-                        {
-                            "requested_model": request.model,
-                            "model_used": outcome.model,
-                            "request_id": request.request_id,
-                        },
+                        fallback_alert_fields(
+                            requested_model=request.model,
+                            model_used=outcome.model,
+                            request_id=request.request_id,
+                            attempts=attempts,
+                        ),
                     )
                 self._events.emit(
                     "llm_video_job_submitted",
@@ -459,8 +475,9 @@ class VideoGateway:
                         "status": outcome.status.value,
                     },
                 )
-                # Nothing is recorded yet on purpose: the clip does not exist,
-                # so any amount here would be invented. The terminal poll bills.
+                # The job itself is not recorded yet on purpose: the clip does
+                # not exist, so any amount here would be invented. The terminal
+                # poll bills it.
                 return outcome
             last_failure = outcome
 
@@ -480,17 +497,14 @@ class VideoGateway:
         request: VideoRequest,
         *,
         model: str,
+        adapter: VideoJobProviderAdapter,
         attempts: list[VideoAttempt],
     ) -> VideoJob | LLMGatewayError:
-        adapter = self._registry.resolve(model)
         policy = request.retry_policy
-        last_failure: LLMGatewayError | None = None
 
         for attempt_number in range(1, policy.max_attempts + 1):
             attempt_started = time.perf_counter()
             try:
-                _require_job_provider(adapter)
-                assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
                 async with asyncio.timeout(request.timeout_policy.per_attempt_seconds):
                     job = await adapter.submit_video(request, model=model)
             except asyncio.CancelledError:
@@ -498,11 +512,12 @@ class VideoGateway:
                 # accepted the submission but before its id reaches us. That
                 # can leave a billable orphan, so it cannot be recorded free.
                 attempts.append(
-                    _record_video_attempt(
+                    new_attempt(
+                        VideoAttempt,
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
-                        outcome="failed",
+                        outcome=AttemptOutcome.FAILED,
                         usage=VideoUsage.unknown(),
                         cost=VideoCost.unavailable(pricing_version=self._prices.version),
                         started=attempt_started,
@@ -523,22 +538,24 @@ class VideoGateway:
             else:
                 return job
 
-            last_failure = failure
             attempts.append(
-                _record_video_attempt(
+                new_attempt(
+                    VideoAttempt,
                     index=len(attempts) + 1,
                     model=model,
                     provider=adapter.name,
-                    outcome="failed",
+                    outcome=AttemptOutcome.FAILED,
                     usage=VideoUsage.unknown(),
                     cost=VideoCost.unavailable(pricing_version=self._prices.version),
                     started=attempt_started,
                     error_type=type(failure).__name__,
                     error_message=message_of(failure),
-                    # A timeout may have accepted a job whose id never reached
-                    # us. Other failures produced no job and no clip.
-                    billable=isinstance(failure, ProviderTimeoutError),
-                    failure_phase=_phase_of(failure),
+                    # Not only a timeout: an id that never came back, or a
+                    # status nobody could read, is raised after the prediction
+                    # was created. Only a request refused before dispatch
+                    # certainly left nothing running.
+                    billable=isinstance(failure, ProviderError),
+                    failure_phase=phase_of(failure),
                 )
             )
             if not policy.should_retry(failure, attempt_number=attempt_number):
@@ -547,8 +564,7 @@ class VideoGateway:
             if delay:
                 await asyncio.sleep(delay)
 
-        assert last_failure is not None
-        return last_failure
+        return failure
 
     async def poll_video(self, job: VideoJob, *, timeout_seconds: float = 30.0) -> VideoJobResult:
         """Read a job's state, and its clip once the provider has one.
@@ -561,13 +577,16 @@ class VideoGateway:
         legitimately run for minutes. Its own budget because a poll takes no
         ``VideoRequest``, and an unbounded one blocks the worker that made it
         on a provider that stopped answering.
+
+        A job passed in already terminal is read but not recorded again: the
+        poll that returned it terminal is the one that billed it, and a
+        webhook handler re-reading what a worker stored would otherwise put
+        the same clip in the ledger twice.
         """
         if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
             raise ValueError("polling timeout must be positive and finite")
 
-        adapter = self._registry.by_name(job.provider)
-        _require_job_provider(adapter)
-        assert isinstance(adapter, VideoJobProviderAdapter)  # narrowed by the check
+        adapter = _job_provider(self._registry.by_name(job.provider))
 
         started = time.perf_counter()
         try:
@@ -586,13 +605,28 @@ class VideoGateway:
                 error=update.error,
             )
 
+        already_billed = job.status.is_terminal
         if update.status is VideoJobStatus.SUCCEEDED and not update.videos:
             # A success carrying nothing would be stored as a finished, empty
-            # clip and never retried. The provider was still paid for it.
-            raise AllVideosFailed(
-                f"{job.provider} reported job {job.id} as succeeded with no video",
-                attempts=(),
+            # clip and never retried. The provider was still paid for it, so
+            # the refusal is recorded as a billable failure before it is raised.
+            message = f"{job.provider} reported job {job.id} as succeeded with no video"
+            failed = new_attempt(
+                VideoAttempt,
+                index=1,
+                model=job.model,
+                provider=job.provider,
+                outcome=AttemptOutcome.FAILED,
+                usage=update.usage,
+                cost=self._prices.estimate(job.model, update.usage),
+                started=started,
+                error_type=ProviderError.__name__,
+                error_message=message,
+                failure_phase=FailurePhase.PROVIDER,
             )
+            if not already_billed:
+                self._record_job(job, failed, started=started, succeeded=False)
+            raise AllVideosFailed(message, attempts=(failed,))
 
         succeeded = update.status is VideoJobStatus.SUCCEEDED
         usage = update.usage if succeeded else VideoUsage.unknown()
@@ -601,52 +635,37 @@ class VideoGateway:
             if succeeded
             else VideoCost.unavailable(pricing_version=self._prices.version)
         )
-        execution = VideoExecution(
-            requested_model=job.model,
-            model_used=job.model,
-            provider=job.provider,
-            attempts=(
-                _record_video_attempt(
-                    index=1,
-                    model=job.model,
-                    provider=job.provider,
-                    outcome="succeeded" if succeeded else "failed",
-                    usage=usage,
-                    cost=cost,
-                    started=started,
-                    error_type=None if succeeded else "VideoJobFailed",
-                    error_message=None if succeeded else (update.error or None),
-                    failure_phase=None if succeeded else FailurePhase.PROVIDER,
-                ),
-            ),
-            latency_ms=int((time.perf_counter() - started) * 1000),
-        )
-        self._usage_sink.record(
-            video_execution_to_record(
-                execution,
+        if not already_billed:
+            attempt = new_attempt(
+                VideoAttempt,
+                index=1,
+                model=job.model,
+                provider=job.provider,
+                outcome=AttemptOutcome.SUCCEEDED if succeeded else AttemptOutcome.FAILED,
                 usage=usage,
                 cost=cost,
-                request_id=job.request_id,
-                source=job.source,
-                succeeded=succeeded,
+                started=started,
+                error_type=None if succeeded else "VideoJobFailed",
+                error_message=None if succeeded else (update.error or None),
+                failure_phase=None if succeeded else FailurePhase.PROVIDER,
             )
-        )
-        self._events.emit(
-            "llm_video_job_succeeded" if succeeded else "llm_video_job_failed",
-            {
-                "request_id": job.request_id,
-                "source": job.source,
-                "provider": job.provider,
-                "requested_model": job.model,
-                "model_used": job.model,
-                "status": update.status.value,
-                "video_seconds": usage.seconds,
-                "resolution": usage.resolution,
-                "cost_microusd": cost.microusd,
-                "cost_measurement": cost.measurement.value,
-                "pricing_version": cost.pricing_version,
-            },
-        )
+            self._record_job(job, attempt, started=started, succeeded=succeeded)
+            self._events.emit(
+                "llm_video_job_succeeded" if succeeded else "llm_video_job_failed",
+                {
+                    "request_id": job.request_id,
+                    "source": job.source,
+                    "provider": job.provider,
+                    "requested_model": job.model,
+                    "model_used": job.model,
+                    "status": update.status.value,
+                    "video_seconds": usage.seconds,
+                    "resolution": usage.resolution,
+                    "cost_microusd": cost.microusd,
+                    "cost_measurement": cost.measurement.value,
+                    "pricing_version": cost.pricing_version,
+                },
+            )
         return VideoJobResult(
             job=polled,
             videos=update.videos,
@@ -655,37 +674,63 @@ class VideoGateway:
             error=update.error,
         )
 
-    async def _run(self, request: VideoRequest, attempts: list[VideoAttempt]) -> VideoResult:
-        started = time.perf_counter()
+    def _record_job(
+        self, job: VideoJob, attempt: VideoAttempt, *, started: float, succeeded: bool
+    ) -> None:
+        execution = VideoExecution(
+            requested_model=job.model,
+            model_used=job.model,
+            provider=job.provider,
+            attempts=(attempt,),
+            latency_ms=elapsed_ms(started),
+        )
+        self._usage_sink.record(
+            video_execution_to_record(
+                execution,
+                usage=attempt.usage,
+                cost=attempt.cost,
+                request_id=job.request_id,
+                source=job.source,
+                succeeded=succeeded,
+            )
+        )
+
+    async def _run(
+        self, request: VideoRequest, attempts: list[VideoAttempt], *, started: float
+    ) -> VideoResult:
         plan = [request.model, *request.fallback_policy.models]
+        adapters = {model: self._registry.resolve(model) for model in plan}
         for model in plan:
-            self._registry.resolve(model)
             _require_video_model(model)
 
         last_failure: LLMGatewayError | None = None
         for model in plan:
-            adapter = self._registry.resolve(model)
-            outcome = await self._attempt_model(request, model=model, attempts=attempts)
+            adapter = adapters[model]
+            outcome = await self._attempt_model(
+                request, model=model, adapter=adapter, attempts=attempts
+            )
             if isinstance(outcome, ProviderVideoResponse):
-                elapsed_ms = int((time.perf_counter() - started) * 1000)
                 execution = VideoExecution(
                     requested_model=request.model,
                     model_used=outcome.model_used or model,
                     provider=adapter.name,
                     attempts=tuple(attempts),
-                    latency_ms=elapsed_ms,
+                    latency_ms=elapsed_ms(started),
                 )
                 usage, cost = _aggregate_video(attempts)
+                # Booked first: an alert hook that fails must not leave a paid
+                # call unrecorded.
+                self._record(request, execution, usage=usage, cost=cost, succeeded=True)
                 if execution.fallback_used:
                     self._alerts.alert(
                         "llm_video_fallback_used",
-                        {
-                            "requested_model": request.model,
-                            "model_used": execution.model_used,
-                            "request_id": request.request_id,
-                        },
+                        fallback_alert_fields(
+                            requested_model=request.model,
+                            model_used=execution.model_used,
+                            request_id=request.request_id,
+                            attempts=attempts,
+                        ),
                     )
-                self._record(request, execution, usage=usage, cost=cost, succeeded=True)
                 self._events.emit(
                     "llm_video_generation_succeeded",
                     _video_event_fields(request, execution, usage=usage, cost=cost),
@@ -709,14 +754,17 @@ class VideoGateway:
         request: VideoRequest,
         *,
         model: str,
+        adapter: ProviderAdapter,
         attempts: list[VideoAttempt],
     ) -> ProviderVideoResponse | LLMGatewayError:
-        adapter = self._registry.resolve(model)
         policy = request.retry_policy
-        last_failure: LLMGatewayError | None = None
 
         for attempt_number in range(1, policy.max_attempts + 1):
             attempt_started = time.perf_counter()
+            # A failure costs an unknown amount unless the provider said what
+            # it used, which only a reply that arrived can do.
+            usage = VideoUsage.unknown()
+            cost = VideoCost.unavailable(pricing_version=self._prices.version)
             try:
                 if not isinstance(adapter, VideoProviderAdapter):
                     raise ConfigurationError(
@@ -724,8 +772,6 @@ class VideoGateway:
                     )
                 async with asyncio.timeout(request.timeout_policy.per_attempt_seconds):
                     response = await adapter.generate_video(request, model=model)
-                if not response.videos:
-                    raise ProviderError(f"{adapter.name} returned no video")
             except TimeoutError as error:
                 failure: LLMGatewayError = ProviderTimeoutError(
                     f"video attempt exceeded {request.timeout_policy.per_attempt_seconds}s"
@@ -733,11 +779,12 @@ class VideoGateway:
                 failure.__cause__ = error
             except asyncio.CancelledError:
                 attempts.append(
-                    _record_video_attempt(
+                    new_attempt(
+                        VideoAttempt,
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
-                        outcome="failed",
+                        outcome=AttemptOutcome.FAILED,
                         usage=VideoUsage.unknown(),
                         cost=VideoCost.unavailable(pricing_version=self._prices.version),
                         started=attempt_started,
@@ -753,33 +800,38 @@ class VideoGateway:
             else:
                 usage = response.usage
                 cost = self._prices.estimate(model, usage)
-                attempts.append(
-                    _record_video_attempt(
-                        index=len(attempts) + 1,
-                        model=model,
-                        provider=adapter.name,
-                        outcome="succeeded",
-                        usage=usage,
-                        cost=cost,
-                        started=attempt_started,
+                if response.videos:
+                    attempts.append(
+                        new_attempt(
+                            VideoAttempt,
+                            index=len(attempts) + 1,
+                            model=model,
+                            provider=adapter.name,
+                            outcome=AttemptOutcome.SUCCEEDED,
+                            usage=usage,
+                            cost=cost,
+                            started=attempt_started,
+                        )
                     )
-                )
-                return response
+                    return response
+                # Rendered and invoiced, then delivered nothing: the seconds
+                # the provider reported stay on the failed attempt.
+                failure = ProviderError(f"{adapter.name} returned no video")
 
-            last_failure = failure
             attempts.append(
-                _record_video_attempt(
+                new_attempt(
+                    VideoAttempt,
                     index=len(attempts) + 1,
                     model=model,
                     provider=adapter.name,
-                    outcome="failed",
-                    usage=VideoUsage.unknown(),
-                    cost=VideoCost.unavailable(pricing_version=self._prices.version),
+                    outcome=AttemptOutcome.FAILED,
+                    usage=usage,
+                    cost=cost,
                     started=attempt_started,
                     error_type=type(failure).__name__,
                     error_message=message_of(failure),
                     billable=isinstance(failure, ProviderError),
-                    failure_phase=_phase_of(failure),
+                    failure_phase=phase_of(failure),
                 )
             )
             if not policy.should_retry(failure, attempt_number=attempt_number):
@@ -788,26 +840,29 @@ class VideoGateway:
             if delay:
                 await asyncio.sleep(delay)
 
-        assert last_failure is not None
-        return last_failure
+        return failure
+
+    def _failed_execution(
+        self, request: VideoRequest, attempts: list[VideoAttempt], *, started: float
+    ) -> VideoExecution:
+        return VideoExecution(
+            requested_model=request.model,
+            model_used=attempts[-1].model if attempts else request.model,
+            provider=attempts[-1].provider if attempts else "unknown",
+            attempts=tuple(attempts),
+            latency_ms=elapsed_ms(started),
+        )
 
     def _report_failure(
         self,
         request: VideoRequest,
         attempts: list[VideoAttempt],
         *,
-        started: float | None = None,
+        started: float,
         event: str = "llm_video_generation_failed",
     ) -> None:
         usage, cost = _aggregate_video(attempts)
-        elapsed_ms = int((time.perf_counter() - started) * 1000) if started is not None else 0
-        execution = VideoExecution(
-            requested_model=request.model,
-            model_used=attempts[-1].model if attempts else request.model,
-            provider=attempts[-1].provider if attempts else "unknown",
-            attempts=tuple(attempts),
-            latency_ms=elapsed_ms,
-        )
+        execution = self._failed_execution(request, attempts, started=started)
         self._record(request, execution, usage=usage, cost=cost, succeeded=False)
         self._events.emit(
             event,
@@ -835,7 +890,7 @@ class VideoGateway:
         )
 
 
-def _require_job_provider(adapter: object) -> None:
+def _job_provider(adapter: ProviderAdapter) -> VideoJobProviderAdapter:
     """Refuse a provider whose video is awaited rather than submitted.
 
     The two shapes are not interchangeable, and the wrong one is worth an
@@ -843,11 +898,11 @@ def _require_job_provider(adapter: object) -> None:
     one would poll something that does not exist.
     """
     if not isinstance(adapter, VideoJobProviderAdapter):
-        name = getattr(adapter, "name", "unknown")
         raise ConfigurationError(
-            f"provider {name} cannot submit or poll a video job; "
+            f"provider {adapter.name} cannot submit or poll a video job; "
             f"use LLMGateway.generate_video() instead"
         )
+    return adapter
 
 
 def _require_video_model(model: str) -> None:
@@ -856,45 +911,10 @@ def _require_video_model(model: str) -> None:
         raise ConfigurationError(f"{model!r} does not generate video; use LLMGateway.generate()")
 
 
-def _record_video_attempt(
-    *,
-    index: int,
-    model: str,
-    provider: str,
-    outcome: str,
-    usage: VideoUsage,
-    cost: VideoCost,
-    started: float,
-    error_type: str | None = None,
-    error_message: str | None = None,
-    billable: bool = True,
-    failure_phase: FailurePhase | None = None,
-) -> VideoAttempt:
-    return VideoAttempt(
-        index=index,
-        model=model,
-        provider=provider,
-        outcome=AttemptOutcome.SUCCEEDED if outcome == "succeeded" else AttemptOutcome.FAILED,
-        usage=usage,
-        cost=cost,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        error_type=error_type,
-        error_message=error_message,
-        billable=billable,
-        failure_phase=failure_phase,
-    )
-
-
 def _aggregate_video(attempts: list[VideoAttempt]) -> tuple[VideoUsage, VideoCost]:
-    billable = [attempt for attempt in attempts if attempt.billable]
-    if not billable:
-        return VideoUsage.unknown(), VideoCost.unavailable()
-    usage = billable[0].usage
-    cost = billable[0].cost
-    for attempt in billable[1:]:
-        usage = usage.merge(attempt.usage)
-        cost = cost.merge(attempt.cost)
-    return usage, cost
+    return aggregate(
+        attempts, unknown_usage=VideoUsage.unknown(), unavailable_cost=VideoCost.unavailable()
+    )
 
 
 def _video_event_fields(

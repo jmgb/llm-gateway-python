@@ -5,6 +5,13 @@ from __future__ import annotations
 import asyncio
 import time
 
+from llm_gateway._attempts import (
+    aggregate,
+    elapsed_ms,
+    fallback_alert_fields,
+    new_attempt,
+    phase_of,
+)
 from llm_gateway.audio import (
     AudioAttempt,
     AudioExecution,
@@ -33,7 +40,7 @@ from llm_gateway.ports import (
     audio_execution_to_record,
 )
 from llm_gateway.pricing import AudioCost, AudioPriceCatalog
-from llm_gateway.providers.base import AudioProviderAdapter
+from llm_gateway.providers.base import AudioProviderAdapter, ProviderAdapter
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.usage import AudioUsage
 
@@ -58,11 +65,17 @@ class AudioGateway:
 
     async def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         attempts: list[AudioAttempt] = []
+        started = time.perf_counter()
+        budget = asyncio.timeout(request.timeout_policy.total_seconds)
         try:
-            async with asyncio.timeout(request.timeout_policy.total_seconds):
-                return await self._run(request, attempts)
+            async with budget:
+                return await self._run(request, attempts, started=started)
         except TimeoutError:
-            self._report_failure(request, attempts)
+            # Only the budget expiring is the call running out of time; an
+            # application sink timing out after a success is not.
+            if not budget.expired():
+                raise
+            self._report_failure(request, attempts, started=started)
             raise AllTranscriptionsFailed(
                 f"the transcription exceeded its total budget of "
                 f"{request.timeout_policy.total_seconds}s after {len(attempts)} attempt(s)",
@@ -70,37 +83,44 @@ class AudioGateway:
             ) from None
 
     async def _run(
-        self, request: TranscriptionRequest, attempts: list[AudioAttempt]
+        self, request: TranscriptionRequest, attempts: list[AudioAttempt], *, started: float
     ) -> TranscriptionResult:
-        started = time.perf_counter()
+        # Every model is checked before the first is called: a token model
+        # discovered only when its fallback turn came would fail after the
+        # requested one had already been paid for.
         plan = [request.model, *request.fallback_policy.models]
+        adapters = {model: self._registry.resolve(model) for model in plan}
         for model in plan:
-            self._registry.resolve(model)
+            _require_audio_model(model)
 
         last_failure: LLMGatewayError | None = None
         for model in plan:
-            adapter = self._registry.resolve(model)
-            outcome = await self._attempt_model(request, model=model, attempts=attempts)
+            adapter = adapters[model]
+            outcome = await self._attempt_model(
+                request, model=model, adapter=adapter, attempts=attempts
+            )
             if isinstance(outcome, ProviderTranscriptionResponse):
-                elapsed_ms = int((time.perf_counter() - started) * 1000)
                 execution = AudioExecution(
                     requested_model=request.model,
                     model_used=outcome.model_used or model,
                     provider=adapter.name,
                     attempts=tuple(attempts),
-                    latency_ms=elapsed_ms,
+                    latency_ms=elapsed_ms(started),
                 )
                 usage, cost = _aggregate(attempts)
+                # Booked first: an alert hook that fails must not leave a paid
+                # call unrecorded.
+                self._record(request, execution, usage=usage, cost=cost, succeeded=True)
                 if execution.fallback_used:
                     self._alerts.alert(
                         "llm_audio_fallback_used",
-                        {
-                            "requested_model": request.model,
-                            "model_used": execution.model_used,
-                            "request_id": request.request_id,
-                        },
+                        fallback_alert_fields(
+                            requested_model=request.model,
+                            model_used=execution.model_used,
+                            request_id=request.request_id,
+                            attempts=attempts,
+                        ),
                     )
-                self._record(request, execution, usage=usage, cost=cost, succeeded=True)
                 self._events.emit(
                     "llm_audio_transcription_succeeded",
                     _event_fields(request, execution, usage=usage, cost=cost),
@@ -126,16 +146,14 @@ class AudioGateway:
         request: TranscriptionRequest,
         *,
         model: str,
+        adapter: ProviderAdapter,
         attempts: list[AudioAttempt],
     ) -> ProviderTranscriptionResponse | LLMGatewayError:
-        adapter = self._registry.resolve(model)
         policy = request.retry_policy
-        last_failure: LLMGatewayError | None = None
 
         for attempt_number in range(1, policy.max_attempts + 1):
             attempt_started = time.perf_counter()
             try:
-                _require_audio_model(model)
                 if not isinstance(adapter, AudioProviderAdapter):
                     raise ConfigurationError(
                         f"provider {adapter.name} does not support transcription"
@@ -149,11 +167,12 @@ class AudioGateway:
                 failure.__cause__ = error
             except asyncio.CancelledError:
                 attempts.append(
-                    _record_attempt(
+                    new_attempt(
+                        AudioAttempt,
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
-                        outcome="failed",
+                        outcome=AttemptOutcome.FAILED,
                         usage=AudioUsage.unknown(),
                         cost=AudioCost.unavailable(pricing_version=self._prices.version),
                         started=attempt_started,
@@ -170,11 +189,12 @@ class AudioGateway:
                 usage = response.usage
                 cost = self._prices.estimate(model, usage)
                 attempts.append(
-                    _record_attempt(
+                    new_attempt(
+                        AudioAttempt,
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
-                        outcome="succeeded",
+                        outcome=AttemptOutcome.SUCCEEDED,
                         usage=usage,
                         cost=cost,
                         started=attempt_started,
@@ -182,20 +202,20 @@ class AudioGateway:
                 )
                 return response
 
-            last_failure = failure
             attempts.append(
-                _record_attempt(
+                new_attempt(
+                    AudioAttempt,
                     index=len(attempts) + 1,
                     model=model,
                     provider=adapter.name,
-                    outcome="failed",
+                    outcome=AttemptOutcome.FAILED,
                     usage=AudioUsage.unknown(),
                     cost=AudioCost.unavailable(pricing_version=self._prices.version),
                     started=attempt_started,
                     error_type=type(failure).__name__,
                     error_message=message_of(failure),
                     billable=isinstance(failure, ProviderError),
-                    failure_phase=_phase_of(failure),
+                    failure_phase=phase_of(failure),
                 )
             )
             if not policy.should_retry(failure, attempt_number=attempt_number):
@@ -204,24 +224,22 @@ class AudioGateway:
             if delay:
                 await asyncio.sleep(delay)
 
-        assert last_failure is not None
-        return last_failure
+        return failure
 
     def _report_failure(
         self,
         request: TranscriptionRequest,
         attempts: list[AudioAttempt],
         *,
-        started: float | None = None,
+        started: float,
     ) -> None:
         usage, cost = _aggregate(attempts)
-        elapsed_ms = int((time.perf_counter() - started) * 1000) if started is not None else 0
         execution = AudioExecution(
             requested_model=request.model,
             model_used=attempts[-1].model if attempts else request.model,
             provider=attempts[-1].provider if attempts else "unknown",
             attempts=tuple(attempts),
-            latency_ms=elapsed_ms,
+            latency_ms=elapsed_ms(started),
         )
         self._record(request, execution, usage=usage, cost=cost, succeeded=False)
         self._events.emit(
@@ -256,53 +274,10 @@ def _require_audio_model(model: str) -> None:
         raise ConfigurationError(f"{model!r} is token-priced; use LLMGateway.generate()")
 
 
-def _record_attempt(
-    *,
-    index: int,
-    model: str,
-    provider: str,
-    outcome: str,
-    usage: AudioUsage,
-    cost: AudioCost,
-    started: float,
-    error_type: str | None = None,
-    error_message: str | None = None,
-    billable: bool = True,
-    failure_phase: FailurePhase | None = None,
-) -> AudioAttempt:
-    return AudioAttempt(
-        index=index,
-        model=model,
-        provider=provider,
-        outcome=AttemptOutcome.SUCCEEDED if outcome == "succeeded" else AttemptOutcome.FAILED,
-        usage=usage,
-        cost=cost,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        error_type=error_type,
-        error_message=error_message,
-        billable=billable,
-        failure_phase=failure_phase,
-    )
-
-
-def _phase_of(failure: LLMGatewayError) -> FailurePhase:
-    if isinstance(failure, ConfigurationError):
-        return FailurePhase.CONFIGURATION
-    if isinstance(failure, ProviderTimeoutError):
-        return FailurePhase.TIMEOUT
-    return FailurePhase.PROVIDER
-
-
 def _aggregate(attempts: list[AudioAttempt]) -> tuple[AudioUsage, AudioCost]:
-    billable = [attempt for attempt in attempts if attempt.billable]
-    if not billable:
-        return AudioUsage.unknown(), AudioCost.unavailable()
-    usage = billable[0].usage
-    cost = billable[0].cost
-    for attempt in billable[1:]:
-        usage = usage.merge(attempt.usage)
-        cost = cost.merge(attempt.cost)
-    return usage, cost
+    return aggregate(
+        attempts, unknown_usage=AudioUsage.unknown(), unavailable_cost=AudioCost.unavailable()
+    )
 
 
 def _event_fields(

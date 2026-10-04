@@ -13,6 +13,7 @@ from llm_gateway.audio import (
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest
 from llm_gateway.errors import ConfigurationError, LLMGatewayError, ProviderError
+from llm_gateway.providers._polling import read_status
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 
@@ -104,7 +105,11 @@ class AssemblyAIAdapter:
                 raise ProviderError("AssemblyAI returned no transcript id")
 
             for attempt in range(self._max_poll_attempts):
-                result = await self._client.get(f"/transcript/{transcript_id}")
+                result = await read_status(
+                    self._client.get,
+                    f"/transcript/{transcript_id}",
+                    interval_seconds=self._poll_interval_seconds,
+                )
                 status = result.get("status")
                 if status == "completed":
                     return normalize_provider_transcription(
@@ -122,7 +127,7 @@ class AssemblyAIAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         raise ConfigurationError("AssemblyAI only supports transcription requests")

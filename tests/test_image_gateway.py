@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import pytest
@@ -24,6 +25,7 @@ from llm_gateway import (
     RateLimitedError,
     RetryPolicy,
     StaticImagePriceCatalog,
+    TimeoutPolicy,
     TokenUsage,
 )
 
@@ -75,7 +77,17 @@ def _request(**kwargs: object) -> ImageRequest:
     )
 
 
-def _gateway(*adapters: object, sink: ImageSink | None = None) -> LLMGateway:
+class AlertSink:
+    def __init__(self) -> None:
+        self.alerts: list[tuple[str, dict[str, object]]] = []
+
+    def alert(self, name: str, fields: dict[str, object]) -> None:
+        self.alerts.append((name, fields))
+
+
+def _gateway(
+    *adapters: object, sink: ImageSink | None = None, alerts: AlertSink | None = None
+) -> LLMGateway:
     registry = ProviderRegistry()
     for adapter in adapters:
         registry.register(adapter, model_prefixes=())  # type: ignore[arg-type]
@@ -89,6 +101,7 @@ def _gateway(*adapters: object, sink: ImageSink | None = None) -> LLMGateway:
             },
         ),
         image_usage_sink=sink,
+        alert_sink=alerts,
     )
 
 
@@ -189,3 +202,77 @@ async def test_sinks_receive_metadata_only_never_the_prompt_or_the_image() -> No
     assert "a cat wearing a hat" not in repr(fields)
     assert record.request_id == "req-1"
     assert record.source == "whatsapp"
+
+
+async def test_an_image_fallback_alert_says_why_the_requested_model_was_left() -> None:
+    alerts = AlertSink()
+    replicate = RecordingImageAdapter("replicate", RateLimitedError("429"))
+    wavespeed = RecordingImageAdapter("wavespeed", _response("https://cdn.test/backup.png"))
+
+    await _gateway(replicate, wavespeed, alerts=alerts).generate_image(
+        _request(fallback_policy=FallbackPolicy.models_in_order("wavespeed-ai/hidream-i1-dev"))
+    )
+
+    name, fields = alerts.alerts[0]
+    assert name == "llm_image_fallback_used"
+    assert fields["error_type"] == "RateLimitedError"
+    assert fields["error_message"] == "429"
+    assert fields["failure_phase"] == "provider"
+    assert len(fields["failures"]) == 1  # type: ignore[arg-type]
+
+
+async def test_an_empty_reply_keeps_the_usage_the_provider_reported() -> None:
+    """Gemini bills the tokens of a reply that carried no picture all the same."""
+    adapter = RecordingImageAdapter(
+        "gemini",
+        ProviderImageResponse(
+            images=(),
+            usage=ImageUsage(images=0, tokens=TokenUsage(input_tokens=8, output_tokens=12)),
+        ),
+    )
+
+    with pytest.raises(AllImagesFailed) as raised:
+        await _gateway(adapter).generate_image(_request(model="gemini-3.1-flash-image"))
+
+    attempt = raised.value.attempts[0]
+    assert attempt.usage.tokens == TokenUsage(input_tokens=8, output_tokens=12)
+    assert attempt.billable is True
+
+
+async def test_a_call_cut_off_by_its_total_budget_reports_how_long_it_ran() -> None:
+    """Zero latency on a call that spent its whole budget reads as an instant failure."""
+
+    class SlowAdapter(RecordingImageAdapter):
+        async def generate_image(
+            self, request: ImageRequest, *, model: str
+        ) -> ProviderImageResponse:
+            await asyncio.sleep(1)
+            raise AssertionError("the total budget should interrupt this call")
+
+    sink = ImageSink()
+
+    with pytest.raises(AllImagesFailed):
+        await _gateway(SlowAdapter("replicate"), sink=sink).generate_image(
+            _request(timeout_policy=TimeoutPolicy(total_seconds=0.02))
+        )
+
+    assert sink.records[0].latency_ms >= 15
+
+
+class TimingOutImageSink(ImageSink):
+    """The application's own ledger timing out, not the call's budget."""
+
+    def record(self, record: ImageUsageRecord) -> None:
+        super().record(record)
+        raise TimeoutError("the usage database did not answer")
+
+
+async def test_a_sink_timeout_is_not_mistaken_for_the_image_call_exceeding_its_budget() -> None:
+    """Reporting the paid image again as a failure would book it twice."""
+    sink = TimingOutImageSink()
+    adapter = RecordingImageAdapter("replicate", _response())
+
+    with pytest.raises(TimeoutError, match="usage database"):
+        await _gateway(adapter, sink=sink).generate_image(_request())
+
+    assert [record.succeeded for record in sink.records] == [True]

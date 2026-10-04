@@ -24,6 +24,7 @@ from llm_gateway.media import (
     ProviderVideoResponse,
     VideoRequest,
 )
+from llm_gateway.providers._polling import read_status
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.validation import reject_unsendable_image_options
@@ -42,6 +43,11 @@ CAPABILITIES = ProviderCapabilities(
 # A model absent here is one whose tiers nobody read from WaveSpeed's docs, and
 # it is left to the provider's own default rather than given an invented floor.
 _LOWEST_RESOLUTION = {"wavespeed-ai/minimax-h3/image-to-video": "480p"}
+
+# WaveSpeed's documented terminal failures. Every other status is polled again,
+# as its documentation asks: refusing an unfamiliar one would abandon a task
+# that is still running and still being billed.
+_GAVE_UP = {"failed", "cancelled", "timeout", "deleted"}
 
 
 class WaveSpeedHttpClient:
@@ -119,7 +125,7 @@ class WaveSpeedAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         images = tuple(GeneratedImage(url=str(url)) for url in outputs if url)
         if not images:
@@ -132,6 +138,12 @@ class WaveSpeedAdapter:
 
     async def generate_video(self, request: VideoRequest, *, model: str) -> ProviderVideoResponse:
         """Send prompt, first frame and clip settings, then poll for the MP4."""
+        if request.webhook_url is not None:
+            # This call waits for the clip itself, and WaveSpeed is never told
+            # about the URL, so nothing would ever call it.
+            raise ConfigurationError(
+                "WaveSpeed video is awaited, not announced; it cannot register a webhook"
+            )
         if model.endswith("/image-to-video") and request.image is None:
             raise ConfigurationError(f"{model} requires a first frame")
         payload: dict[str, Any] = {"prompt": request.prompt}
@@ -158,7 +170,7 @@ class WaveSpeedAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         videos = tuple(
             GeneratedVideo(url=str(url), mime_type="video/mp4") for url in outputs if url
@@ -182,13 +194,17 @@ class WaveSpeedAdapter:
 
     async def _poll(self, task_id: str) -> list[Any]:
         for attempt in range(self._max_poll_attempts):
-            result = await self._client.get(f"/api/v3/predictions/{task_id}/result")
+            result = await read_status(
+                self._client.get,
+                f"/api/v3/predictions/{task_id}/result",
+                interval_seconds=self._poll_interval_seconds,
+            )
             _require_success(result)
             data = result.get("data") or {}
             status = data.get("status")
             if status == "completed":
                 return list(data.get("outputs") or [])
-            if status in {"failed", "cancelled", "timeout"}:
+            if status in _GAVE_UP:
                 raise ProviderError(f"WaveSpeed generation ended with status {status}")
             if attempt + 1 < self._max_poll_attempts:
                 await asyncio.sleep(self._poll_interval_seconds)

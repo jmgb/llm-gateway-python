@@ -21,10 +21,12 @@ from llm_gateway import (
     ConfigurationError,
     CostMeasurement,
     FailurePhase,
+    FallbackPolicy,
     GeneratedVideo,
     ImageInput,
     LLMGateway,
     LLMRequest,
+    ProviderError,
     ProviderRegistry,
     ProviderResponse,
     ProviderTimeoutError,
@@ -44,6 +46,7 @@ from llm_gateway import (
 )
 
 MODEL = "wan-video/wan-2.2-5b-fast"
+FALLBACK_MODEL = "bytedance/seedance-2.5"
 POLLED_MODEL = "wavespeed-ai/minimax-h3/image-to-video"
 
 
@@ -107,6 +110,23 @@ class EventSink:
         self.events.append((event, fields))
 
 
+class AlertSink:
+    def __init__(self) -> None:
+        self.alerts: list[tuple[str, dict[str, object]]] = []
+
+    def alert(self, name: str, fields: dict[str, object]) -> None:
+        self.alerts.append((name, fields))
+
+
+def _finished(**kwargs: object) -> ProviderVideoJobUpdate:
+    return ProviderVideoJobUpdate(
+        status=VideoJobStatus.SUCCEEDED,
+        videos=(GeneratedVideo(url="https://cdn.test/lion.mp4"),),
+        usage=VideoUsage(seconds=5.0, videos=1),
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
 def _request(**kwargs: object) -> VideoRequest:
     return VideoRequest(
         model=str(kwargs.pop("model", MODEL)),
@@ -128,11 +148,14 @@ def _gateway(
     *adapters: object,
     sink: VideoSink | None = None,
     events: EventSink | None = None,
+    alerts: AlertSink | None = None,
 ) -> LLMGateway:
     registry = ProviderRegistry()
     for adapter in adapters:
         registry.register(adapter, model_prefixes=())  # type: ignore[arg-type]
-    return LLMGateway(registry=registry, video_usage_sink=sink, event_sink=events)
+    return LLMGateway(
+        registry=registry, video_usage_sink=sink, event_sink=events, alert_sink=alerts
+    )
 
 
 class TestTheJobItself:
@@ -223,6 +246,77 @@ class TestSubmitting:
 
         assert job.id == "pred-2"
         assert len(adapter.submitted) == 2
+
+    async def test_a_submission_that_succeeds_after_a_billable_failure_records_that_failure(
+        self,
+    ) -> None:
+        """A timed-out submission may have created a prediction nobody will ever poll.
+
+        The job that did come back is billed by the poll that finishes it; the
+        orphan never will be, so it has to be counted when it happens.
+        """
+        sink = VideoSink()
+        adapter = RecordingJobAdapter(
+            "replicate", ProviderTimeoutError("submission timed out"), _job(id="pred-2")
+        )
+
+        job = await _gateway(adapter, sink=sink).submit_video(
+            _request(retry_policy=RetryPolicy.transient(base_delay_seconds=0.0))
+        )
+
+        assert job.id == "pred-2"
+        assert len(sink.records) == 1
+        assert sink.records[0].succeeded is False
+        assert sink.records[0].attempts == 1
+        assert sink.records[0].cost.measurement is CostMeasurement.UNAVAILABLE
+
+    async def test_a_clean_submission_still_records_nothing(self) -> None:
+        sink = VideoSink()
+
+        await _gateway(RecordingJobAdapter("replicate", _job()), sink=sink).submit_video(_request())
+
+        assert sink.records == []
+
+    async def test_a_failure_raised_after_the_prediction_was_created_is_potentially_billable(
+        self,
+    ) -> None:
+        """An id-less or unreadable prediction may be running, and invoiced, anyway."""
+        adapter = RecordingJobAdapter(
+            "replicate", ProviderError("Replicate returned no prediction id")
+        )
+
+        with pytest.raises(AllVideosFailed) as raised:
+            await _gateway(adapter).submit_video(_request())
+
+        assert raised.value.attempts[0].billable is True
+
+    async def test_a_submission_fallback_alert_says_why_the_requested_model_was_left(
+        self,
+    ) -> None:
+        alerts = AlertSink()
+        adapter = RecordingJobAdapter(
+            "replicate", RateLimitedError("429"), _job(model=FALLBACK_MODEL)
+        )
+
+        await _gateway(adapter, alerts=alerts).submit_video(
+            _request(fallback_policy=FallbackPolicy.models_in_order(FALLBACK_MODEL))
+        )
+
+        name, fields = alerts.alerts[0]
+        assert name == "llm_video_fallback_used"
+        assert fields["error_type"] == "RateLimitedError"
+        assert fields["error_message"] == "429"
+        assert fields["failure_phase"] == "provider"
+        assert fields["failures"] == [
+            {
+                "attempt": 1,
+                "model": MODEL,
+                "provider": "replicate",
+                "error_type": "RateLimitedError",
+                "error_message": "429",
+                "failure_phase": "provider",
+            }
+        ]
 
     async def test_a_provider_that_only_polls_cannot_take_a_submission(self) -> None:
         with pytest.raises(ConfigurationError, match="submit"):
@@ -355,6 +449,61 @@ class TestPolling:
 
         with pytest.raises(AllVideosFailed):
             await _gateway(adapter).poll_video(_job())
+
+    async def test_a_succeeded_job_with_no_video_is_still_recorded_as_paid_for(self) -> None:
+        """The provider ran the job and invoiced it; refusing the result is not refunding it."""
+        sink = VideoSink()
+        adapter = RecordingJobAdapter(
+            "replicate", ProviderVideoJobUpdate(status=VideoJobStatus.SUCCEEDED)
+        )
+
+        with pytest.raises(AllVideosFailed) as raised:
+            await _gateway(adapter, sink=sink).poll_video(_job(request_id="req-42"))
+
+        assert len(sink.records) == 1
+        assert sink.records[0].succeeded is False
+        assert sink.records[0].request_id == "req-42"
+        assert sink.records[0].cost.measurement is CostMeasurement.UNAVAILABLE
+        assert raised.value.attempts[0].billable is True
+
+    async def test_polling_a_job_already_known_to_be_terminal_records_nothing_again(
+        self,
+    ) -> None:
+        """A webhook and a worker reading the same finished job bill it once.
+
+        The poll that saw the job finish recorded it and handed back a terminal
+        job; a later poll of that job still returns the clip, but recording it
+        again would put the same invoice in the ledger twice.
+        """
+        sink = VideoSink()
+        events = EventSink()
+        adapter = RecordingJobAdapter("replicate", _finished(), _finished())
+        gateway = _gateway(adapter, sink=sink, events=events)
+
+        first = await gateway.poll_video(_job())
+        second = await gateway.poll_video(first.job)
+
+        assert len(sink.records) == 1
+        assert len(events.events) == 1
+        assert second.videos[0].url == "https://cdn.test/lion.mp4"
+        assert second.job.status is VideoJobStatus.SUCCEEDED
+
+    async def test_a_job_finished_by_the_time_it_was_submitted_is_still_billed(
+        self,
+    ) -> None:
+        """Only a poll bills a job, so a submission never hands one back terminal:
+        the first poll would take it for one already billed and record nothing."""
+        sink = VideoSink()
+        adapter = RecordingJobAdapter(
+            "replicate", _job(status=VideoJobStatus.SUCCEEDED), _finished()
+        )
+        gateway = _gateway(adapter, sink=sink)
+
+        job = await gateway.submit_video(_request())
+        await gateway.poll_video(job)
+
+        assert not job.status.is_terminal
+        assert len(sink.records) == 1
 
     async def test_a_transport_failure_while_polling_is_raised_not_swallowed(self) -> None:
         """A 429 on the status call says nothing about the job behind it."""

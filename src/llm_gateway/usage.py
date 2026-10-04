@@ -195,10 +195,14 @@ class VideoUsage:
             and other.resolution is not None
             and self.resolution != other.resolution
         )
+        # A side that reported no resolution says nothing about the tier, so
+        # the one that did still names it — a failed attempt that measured
+        # nothing must not erase the rate of the clip that was produced. Only
+        # two different tiers leave no single honest answer.
         return VideoUsage(
             seconds=seconds,
             videos=_add(self.videos, other.videos),
-            resolution=(self.resolution if self.resolution == other.resolution else None),
+            resolution=None if resolutions_conflict else (self.resolution or other.resolution),
             partial_aggregate=not (self.complete and other.complete) or resolutions_conflict,
         )
 

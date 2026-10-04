@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from decimal import Decimal
 
@@ -11,6 +12,7 @@ from llm_gateway import (
     AllVideosFailed,
     ConfigurationError,
     CostMeasurement,
+    FallbackPolicy,
     GeneratedVideo,
     ImageInput,
     LLMGateway,
@@ -21,6 +23,7 @@ from llm_gateway import (
     ProviderVideoResponse,
     RateLimitedError,
     StaticVideoPriceCatalog,
+    TimeoutPolicy,
     VideoRate,
     VideoRequest,
     VideoUsage,
@@ -72,11 +75,21 @@ def _request(**kwargs: object) -> VideoRequest:
     )
 
 
-def _gateway(*adapters: object, sink: VideoSink | None = None) -> LLMGateway:
+class AlertSink:
+    def __init__(self) -> None:
+        self.alerts: list[tuple[str, dict[str, object]]] = []
+
+    def alert(self, name: str, fields: dict[str, object]) -> None:
+        self.alerts.append((name, fields))
+
+
+def _gateway(
+    *adapters: object, sink: VideoSink | None = None, alerts: AlertSink | None = None
+) -> LLMGateway:
     registry = ProviderRegistry()
     for adapter in adapters:
         registry.register(adapter, model_prefixes=())  # type: ignore[arg-type]
-    return LLMGateway(registry=registry, video_usage_sink=sink)
+    return LLMGateway(registry=registry, video_usage_sink=sink, alert_sink=alerts)
 
 
 def test_a_video_model_is_declared_in_the_catalogue() -> None:
@@ -170,6 +183,15 @@ def test_merging_different_resolutions_does_not_claim_either_one() -> None:
     assert merged.complete is False
 
 
+def test_merging_an_unknown_usage_keeps_the_resolution_the_other_side_knows() -> None:
+    """A failed attempt that reported nothing says nothing about the clip's tier."""
+    merged = VideoUsage.unknown().merge(VideoUsage(seconds=5, videos=1, resolution="480p"))
+
+    assert merged.resolution == "480p"
+    assert merged.seconds == 5
+    assert merged.complete is False
+
+
 async def test_a_generated_video_is_returned_with_its_own_cost() -> None:
     sink = VideoSink()
     adapter = RecordingVideoAdapter("wavespeed", _response())
@@ -242,3 +264,76 @@ async def test_an_injected_catalogue_overrides_the_built_in_rates() -> None:
 
     assert result.cost.amount_usd == Decimal("0.050000")
     assert result.cost.pricing_version == "negotiated-2026-08"
+
+
+async def test_an_empty_reply_keeps_the_usage_the_provider_reported() -> None:
+    """The provider rendered five seconds and invoiced them; an empty list refunds nothing."""
+    adapter = RecordingVideoAdapter(
+        "wavespeed",
+        ProviderVideoResponse(
+            videos=(), usage=VideoUsage(seconds=5.0, videos=0, resolution="480p")
+        ),
+    )
+
+    with pytest.raises(AllVideosFailed) as raised:
+        await _gateway(adapter).generate_video(_request())
+
+    attempt = raised.value.attempts[0]
+    assert attempt.usage.seconds == 5.0
+    assert attempt.cost.amount_usd == Decimal("0.200000")
+    assert attempt.billable is True
+
+
+async def test_a_video_fallback_alert_says_why_the_requested_model_was_left() -> None:
+    alerts = AlertSink()
+    wavespeed = RecordingVideoAdapter("wavespeed", RateLimitedError("429"))
+    replicate = RecordingVideoAdapter("replicate", _response())
+
+    await _gateway(wavespeed, replicate, alerts=alerts).generate_video(
+        _request(fallback_policy=FallbackPolicy.models_in_order("bytedance/seedance-2.5"))
+    )
+
+    name, fields = alerts.alerts[0]
+    assert name == "llm_video_fallback_used"
+    assert fields["error_type"] == "RateLimitedError"
+    assert fields["failure_phase"] == "provider"
+    assert len(fields["failures"]) == 1  # type: ignore[arg-type]
+
+
+async def test_a_call_cut_off_by_its_total_budget_reports_how_long_it_ran() -> None:
+    """Zero latency on a call that spent its whole budget reads as an instant failure."""
+
+    class SlowAdapter(RecordingVideoAdapter):
+        async def generate_video(
+            self, request: VideoRequest, *, model: str
+        ) -> ProviderVideoResponse:
+            await asyncio.sleep(1)
+            raise AssertionError("the total budget should interrupt this call")
+
+    sink = VideoSink()
+
+    with pytest.raises(AllVideosFailed):
+        await _gateway(SlowAdapter("wavespeed"), sink=sink).generate_video(
+            _request(timeout_policy=TimeoutPolicy(total_seconds=0.02))
+        )
+
+    assert sink.records[0].latency_ms >= 15
+
+
+class TimingOutVideoSink(VideoSink):
+    """The application's own ledger timing out, not the call's budget."""
+
+    def record(self, record: VideoUsageRecord) -> None:
+        super().record(record)
+        raise TimeoutError("the usage database did not answer")
+
+
+async def test_a_sink_timeout_is_not_mistaken_for_the_video_call_exceeding_its_budget() -> None:
+    """Reporting the paid clip again as a failure would book it twice."""
+    sink = TimingOutVideoSink()
+    adapter = RecordingVideoAdapter("wavespeed", _response())
+
+    with pytest.raises(TimeoutError, match="usage database"):
+        await _gateway(adapter, sink=sink).generate_video(_request())
+
+    assert [record.succeeded for record in sink.records] == [True]

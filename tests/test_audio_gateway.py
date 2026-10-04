@@ -13,6 +13,7 @@ from llm_gateway import (
     AudioRate,
     AudioUsage,
     AudioUsageRecord,
+    ConfigurationError,
     FailurePhase,
     FallbackPolicy,
     LLMGateway,
@@ -72,9 +73,26 @@ def _request(**kwargs: object) -> TranscriptionRequest:
     )
 
 
-def _gateway(adapter: RecordingAudioAdapter, sink: AudioSink | None = None) -> LLMGateway:
+class AlertSink:
+    def __init__(self) -> None:
+        self.alerts: list[tuple[str, dict[str, object]]] = []
+
+    def alert(self, name: str, fields: dict[str, object]) -> None:
+        self.alerts.append((name, fields))
+
+
+def _gateway(
+    adapter: RecordingAudioAdapter,
+    sink: AudioSink | None = None,
+    *,
+    also: tuple[RecordingAudioAdapter, ...] = (),
+    alerts: AlertSink | None = None,
+) -> LLMGateway:
     registry = ProviderRegistry()
     registry.register(adapter, model_prefixes=("gpt-", "whisper-", "assemblyai-"))
+    # Catalogued models route by their declared provider, so no prefix needed.
+    for other in also:
+        registry.register(other, model_prefixes=())
     return LLMGateway(
         registry=registry,
         audio_price_catalog=StaticAudioPriceCatalog(
@@ -87,6 +105,7 @@ def _gateway(adapter: RecordingAudioAdapter, sink: AudioSink | None = None) -> L
             },
         ),
         audio_usage_sink=sink,
+        alert_sink=alerts,
     )
 
 
@@ -105,18 +124,16 @@ async def test_transcription_cost_is_audio_cost_not_token_cost() -> None:
 
 
 async def test_transcription_can_fallback_from_openai_to_groq() -> None:
-    adapter = RecordingAudioAdapter(
-        "openai", RateLimitedError("429"), _response("desde groq", 60.0)
-    )
-
-    result = await _gateway(adapter).transcribe(
+    openai = RecordingAudioAdapter("openai", RateLimitedError("429"))
+    groq = RecordingAudioAdapter("groq", _response("from groq", 60.0))
+    result = await _gateway(openai, also=(groq,)).transcribe(
         _request(fallback_policy=FallbackPolicy.models_in_order("whisper-large-v3-turbo"))
     )
 
-    assert result.text == "desde groq"
+    assert result.text == "from groq"
     assert result.execution.fallback_used is True
     assert result.execution.model_used == "whisper-large-v3-turbo"
-    assert len(result.execution.attempts) == 2
+    assert [a.provider for a in result.execution.attempts] == ["openai", "groq"]
 
 
 async def test_unknown_duration_is_unavailable_not_zero() -> None:
@@ -133,7 +150,7 @@ async def test_unknown_duration_is_unavailable_not_zero() -> None:
 async def test_a_token_model_cannot_enter_the_transcription_path() -> None:
     adapter = RecordingAudioAdapter("openai", _response("no", 60.0))
 
-    with pytest.raises(AllTranscriptionsFailed):
+    with pytest.raises(ConfigurationError, match="token-priced"):
         await _gateway(adapter).transcribe(
             TranscriptionRequest(model="gpt-6-luna", audio=AudioInput(data=b"audio"))
         )
@@ -166,3 +183,70 @@ async def test_total_timeout_records_the_provider_attempt_it_interrupts() -> Non
     attempt = raised.value.attempts[0]
     assert attempt.failure_phase is FailurePhase.TIMEOUT
     assert attempt.billable is True
+
+
+async def test_a_token_model_in_the_fallback_plan_is_refused_before_anything_is_spent() -> None:
+    """Found only when its turn came, it would fail after the first model was paid."""
+    adapter = RecordingAudioAdapter("openai", _response("hola", 60.0))
+
+    with pytest.raises(ConfigurationError, match="token-priced"):
+        await _gateway(adapter).transcribe(
+            _request(fallback_policy=FallbackPolicy.models_in_order("gpt-6-luna"))
+        )
+
+    assert adapter.requests == []
+
+
+async def test_an_audio_fallback_alert_says_why_the_requested_model_was_left() -> None:
+    alerts = AlertSink()
+    openai = RecordingAudioAdapter("openai", RateLimitedError("429"))
+    groq = RecordingAudioAdapter("groq", _response("from groq", 60.0))
+
+    await _gateway(openai, also=(groq,), alerts=alerts).transcribe(
+        _request(fallback_policy=FallbackPolicy.models_in_order("whisper-large-v3-turbo"))
+    )
+
+    name, fields = alerts.alerts[0]
+    assert name == "llm_audio_fallback_used"
+    assert fields["error_type"] == "RateLimitedError"
+    assert fields["failure_phase"] == "provider"
+    assert len(fields["failures"]) == 1  # type: ignore[arg-type]
+
+
+async def test_a_call_cut_off_by_its_total_budget_reports_how_long_it_ran() -> None:
+    """Zero latency on a call that spent its whole budget reads as an instant failure."""
+
+    class SlowAdapter(RecordingAudioAdapter):
+        async def transcribe(
+            self, request: TranscriptionRequest, *, model: str
+        ) -> ProviderTranscriptionResponse:
+            await asyncio.sleep(1)
+            raise AssertionError("the total budget should interrupt this call")
+
+    sink = AudioSink()
+
+    with pytest.raises(AllTranscriptionsFailed):
+        await _gateway(SlowAdapter("openai"), sink).transcribe(
+            _request(timeout_policy=TimeoutPolicy(total_seconds=0.02))
+        )
+
+    assert sink.records[0].latency_ms >= 15
+
+
+class TimingOutAudioSink(AudioSink):
+    """The application's own ledger timing out, not the call's budget."""
+
+    def record(self, record: AudioUsageRecord) -> None:
+        super().record(record)
+        raise TimeoutError("the usage database did not answer")
+
+
+async def test_a_sink_timeout_is_not_mistaken_for_the_transcription_exceeding_its_budget() -> None:
+    """Reporting the paid transcription again as a failure would book it twice."""
+    sink = TimingOutAudioSink()
+    adapter = RecordingAudioAdapter("openai", _response("hello", 60.0))
+
+    with pytest.raises(TimeoutError, match="usage database"):
+        await _gateway(adapter, sink).transcribe(_request())
+
+    assert [record.succeeded for record in sink.records] == [True]
