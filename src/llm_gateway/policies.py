@@ -7,9 +7,10 @@ cost attribution, so switching models is always an opt-in decision.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from llm_gateway.errors import LLMGatewayError
 
@@ -28,8 +29,9 @@ class RetryPolicy:
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
             raise ValueError("a retry policy must allow at least one attempt")
-        if self.base_delay_seconds < 0:
-            raise ValueError("base delay cannot be negative")
+        # NaN slips past every comparison and infinity sleeps the whole budget.
+        if not math.isfinite(self.base_delay_seconds) or self.base_delay_seconds < 0:
+            raise ValueError("base delay must be a finite, non-negative number of seconds")
 
     @classmethod
     def disabled(cls) -> RetryPolicy:
@@ -81,6 +83,8 @@ class FallbackPolicy:
         """
         from llm_gateway.models import lookup_model, models_by_provider
 
+        if limit < 1:
+            raise ValueError("a fallback chain needs room for at least one model")
         current = lookup_model(model)
         if current is None:
             raise ValueError(
@@ -92,8 +96,7 @@ class FallbackPolicy:
                 "so no token fallback can be derived"
             )
 
-        def total_price(candidate: object) -> Decimal:
-            info = cast("ModelInfo", candidate)
+        def total_price(info: ModelInfo) -> Decimal:
             return info.input_usd_per_mtok + info.output_usd_per_mtok
 
         cheaper = [
@@ -151,10 +154,12 @@ class TimeoutPolicy:
     per_attempt_seconds_override: float | None = None
 
     def __post_init__(self) -> None:
-        if self.total_seconds <= 0:
-            raise ValueError("timeout must be positive")
-        if self.per_attempt_seconds_override is not None and self.per_attempt_seconds_override <= 0:
-            raise ValueError("per-attempt timeout must be positive")
+        # `asyncio.timeout(nan)` fires at once, so NaN would fail every call.
+        if not (math.isfinite(self.total_seconds) and self.total_seconds > 0):
+            raise ValueError("timeout must be a finite, positive number of seconds")
+        override = self.per_attempt_seconds_override
+        if override is not None and not (math.isfinite(override) and override > 0):
+            raise ValueError("per-attempt timeout must be a finite, positive number of seconds")
 
     @property
     def per_attempt_seconds(self) -> float:

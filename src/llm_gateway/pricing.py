@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Self, runtime_checkable
 
 from llm_gateway.usage import AudioUsage, ImageUsage, TokenUsage, VideoUsage
 
@@ -32,7 +32,9 @@ class CostMeasurement(Enum):
     """Every billable dimension was reported and priced."""
 
     ESTIMATED = "ESTIMATED"
-    """A lower bound: something billable was missing or unpriced."""
+    """Not fully measured: something billable was missing or unpriced, which
+    makes the amount a lower bound, or was priced from a requested figure
+    rather than a reported one."""
 
     UNAVAILABLE = "UNAVAILABLE"
     """No amount could be computed. Not the same as free."""
@@ -68,15 +70,19 @@ class AudioRate:
 
 
 @dataclass(frozen=True, slots=True)
-class Cost:
-    """An amount plus the honesty about how it was obtained."""
+class _Amount:
+    """An amount plus the honesty about how it was obtained.
+
+    Shared by the four cost types, which stay distinct so a token cost can
+    never be merged into an image one: ``merge`` only accepts its own kind.
+    """
 
     measurement: CostMeasurement
     microusd: int | None = None
     pricing_version: str | None = None
 
     @classmethod
-    def unavailable(cls, *, pricing_version: str | None = None) -> Cost:
+    def unavailable(cls, *, pricing_version: str | None = None) -> Self:
         return cls(measurement=CostMeasurement.UNAVAILABLE, pricing_version=pricing_version)
 
     @property
@@ -86,7 +92,7 @@ class Cost:
             return None
         return (Decimal(self.microusd) / _MICRO).quantize(Decimal("0.000001"))
 
-    def merge(self, other: Cost) -> Cost:
+    def merge(self, other: Self) -> Self:
         """Aggregate billable attempts, keeping the weakest measurement."""
         amounts = [c.microusd for c in (self, other) if c.microusd is not None]
         total = sum(amounts) if amounts else None
@@ -96,7 +102,7 @@ class Cost:
             measurement = CostMeasurement.UNAVAILABLE
         else:
             measurement = CostMeasurement.ESTIMATED
-        return Cost(
+        return type(self)(
             measurement=measurement,
             microusd=total,
             pricing_version=self.pricing_version or other.pricing_version,
@@ -104,37 +110,13 @@ class Cost:
 
 
 @dataclass(frozen=True, slots=True)
-class AudioCost:
+class Cost(_Amount):
+    """A token amount plus the honesty about how it was obtained."""
+
+
+@dataclass(frozen=True, slots=True)
+class AudioCost(_Amount):
     """Audio amount kept separate from token ``Cost``."""
-
-    measurement: CostMeasurement
-    microusd: int | None = None
-    pricing_version: str | None = None
-
-    @classmethod
-    def unavailable(cls, *, pricing_version: str | None = None) -> AudioCost:
-        return cls(measurement=CostMeasurement.UNAVAILABLE, pricing_version=pricing_version)
-
-    @property
-    def amount_usd(self) -> Decimal | None:
-        if self.microusd is None:
-            return None
-        return (Decimal(self.microusd) / _MICRO).quantize(Decimal("0.000001"))
-
-    def merge(self, other: AudioCost) -> AudioCost:
-        amounts = [c.microusd for c in (self, other) if c.microusd is not None]
-        total = sum(amounts) if amounts else None
-        if self.measurement is other.measurement:
-            measurement = self.measurement
-        elif total is None:
-            measurement = CostMeasurement.UNAVAILABLE
-        else:
-            measurement = CostMeasurement.ESTIMATED
-        return AudioCost(
-            measurement=measurement,
-            microusd=total,
-            pricing_version=self.pricing_version or other.pricing_version,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,37 +150,8 @@ class ImageRate:
 
 
 @dataclass(frozen=True, slots=True)
-class ImageCost:
+class ImageCost(_Amount):
     """Image amount kept separate from token and audio cost."""
-
-    measurement: CostMeasurement
-    microusd: int | None = None
-    pricing_version: str | None = None
-
-    @classmethod
-    def unavailable(cls, *, pricing_version: str | None = None) -> ImageCost:
-        return cls(measurement=CostMeasurement.UNAVAILABLE, pricing_version=pricing_version)
-
-    @property
-    def amount_usd(self) -> Decimal | None:
-        if self.microusd is None:
-            return None
-        return (Decimal(self.microusd) / _MICRO).quantize(Decimal("0.000001"))
-
-    def merge(self, other: ImageCost) -> ImageCost:
-        amounts = [c.microusd for c in (self, other) if c.microusd is not None]
-        total = sum(amounts) if amounts else None
-        if self.measurement is other.measurement:
-            measurement = self.measurement
-        elif total is None:
-            measurement = CostMeasurement.UNAVAILABLE
-        else:
-            measurement = CostMeasurement.ESTIMATED
-        return ImageCost(
-            measurement=measurement,
-            microusd=total,
-            pricing_version=self.pricing_version or other.pricing_version,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,37 +192,8 @@ class VideoRate:
 
 
 @dataclass(frozen=True, slots=True)
-class VideoCost:
+class VideoCost(_Amount):
     """Video amount kept separate from token, audio and image cost."""
-
-    measurement: CostMeasurement
-    microusd: int | None = None
-    pricing_version: str | None = None
-
-    @classmethod
-    def unavailable(cls, *, pricing_version: str | None = None) -> VideoCost:
-        return cls(measurement=CostMeasurement.UNAVAILABLE, pricing_version=pricing_version)
-
-    @property
-    def amount_usd(self) -> Decimal | None:
-        if self.microusd is None:
-            return None
-        return (Decimal(self.microusd) / _MICRO).quantize(Decimal("0.000001"))
-
-    def merge(self, other: VideoCost) -> VideoCost:
-        amounts = [c.microusd for c in (self, other) if c.microusd is not None]
-        total = sum(amounts) if amounts else None
-        if self.measurement is other.measurement:
-            measurement = self.measurement
-        elif total is None:
-            measurement = CostMeasurement.UNAVAILABLE
-        else:
-            measurement = CostMeasurement.ESTIMATED
-        return VideoCost(
-            measurement=measurement,
-            microusd=total,
-            pricing_version=self.pricing_version or other.pricing_version,
-        )
 
 
 @runtime_checkable
@@ -468,7 +392,8 @@ class StaticVideoPriceCatalog:
 
 
 class NullPriceCatalog:
-    """Default catalogue: reports that cost is unknown, never that it is zero."""
+    """Prices nothing: every cost is unknown, never zero. The gateways default
+    to the built-in catalogue; pass this to opt out of it."""
 
     @property
     def version(self) -> str:
@@ -479,7 +404,7 @@ class NullPriceCatalog:
 
 
 class NullAudioPriceCatalog:
-    """Default audio catalogue: unknown duration/cost, never free."""
+    """Prices no audio: every cost is unknown, never free."""
 
     @property
     def version(self) -> str:
@@ -490,7 +415,7 @@ class NullAudioPriceCatalog:
 
 
 class NullImagePriceCatalog:
-    """Default image catalogue: unknown cost, never free."""
+    """Prices no image: every cost is unknown, never free."""
 
     @property
     def version(self) -> str:
@@ -501,7 +426,7 @@ class NullImagePriceCatalog:
 
 
 class NullVideoPriceCatalog:
-    """Default video catalogue: unknown cost, never free."""
+    """Prices no video: every cost is unknown, never free."""
 
     @property
     def version(self) -> str:

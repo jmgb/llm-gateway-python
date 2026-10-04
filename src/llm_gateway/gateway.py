@@ -19,10 +19,11 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import BaseModel, ValidationError
 
+from llm_gateway._attempts import aggregate, fallback_alert_fields, new_attempt, phase_of
 from llm_gateway.audio import TranscriptionRequest, TranscriptionResult
 from llm_gateway.audio_gateway import AudioGateway
 from llm_gateway.catalogs import builtin_price_catalog
@@ -77,7 +78,8 @@ from llm_gateway.pricing import (
     PriceCatalog,
     VideoPriceCatalog,
 )
-from llm_gateway.providers.base import ProviderResponse
+from llm_gateway.providers.base import ProviderAdapter, ProviderResponse
+from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.registry import ProviderRegistry
 from llm_gateway.tools import ToolCall
 from llm_gateway.usage import TokenUsage
@@ -182,25 +184,38 @@ class LLMGateway:
         caller authorised.
         """
         attempts: list[Attempt] = []
+        started = time.perf_counter()
+        budget = asyncio.timeout(request.timeout_policy.total_seconds)
         try:
-            async with asyncio.timeout(request.timeout_policy.total_seconds):
-                return await self._run(request, attempts)
+            async with budget:
+                return await self._run(request, attempts, started=started, deadline=budget.when())
         except TimeoutError:
-            self._report_failure(request, attempts)
+            # Only the budget expiring is the call running out of time. A sink
+            # of the application's own can time out after a success has been
+            # recorded, and reporting that as a failure would book it twice.
+            if not budget.expired():
+                raise
+            self._report_failure(request, attempts, started=started)
             raise AllAttemptsFailed(
                 f"the call exceeded its total budget of "
                 f"{request.timeout_policy.total_seconds}s after {len(attempts)} attempt(s)",
                 attempts=tuple(attempts),
             ) from None
 
-    async def _run(self, request: LLMRequest, attempts: list[Attempt]) -> LLMResult:
-        started = time.perf_counter()
-
+    async def _run(
+        self,
+        request: LLMRequest,
+        attempts: list[Attempt],
+        *,
+        started: float,
+        deadline: float | None,
+    ) -> LLMResult:
         # Resolve every model up front so an unroutable fallback fails before
         # any money is spent, not halfway through a degraded call.
         plan = [request.model, *request.fallback_policy.models]
+        adapters: dict[str, ProviderAdapter] = {}
         for model in plan:
-            self._registry.resolve(model)
+            adapters[model] = self._registry.resolve(model)
             info = lookup_model(model)
             if info is not None and info.pricing_unit == "audio_minutes":
                 raise ConfigurationError(
@@ -221,9 +236,13 @@ class LLMGateway:
 
         last_failure: LLMGatewayError | None = None
         for model in plan:
-            adapter = self._registry.resolve(model)
+            adapter = adapters[model]
             outcome = await self._attempt_model(
-                requests_by_model[model], model=model, attempts=attempts
+                requests_by_model[model],
+                model=model,
+                adapter=adapter,
+                attempts=attempts,
+                deadline=deadline,
             )
             if not isinstance(outcome, _Completion):
                 last_failure = outcome
@@ -239,33 +258,8 @@ class LLMGateway:
                 latency_ms=elapsed_ms,
             )
             usage, cost = _aggregate(attempts)
-            output = outcome.output
-
-            if execution.fallback_used:
-                # Sin la causa, la alerta dice que se degradó de modelo y deja
-                # al operador reconstruyendo el porqué desde los logs, que para
-                # entonces pueden haber rotado con el despliegue.
-                cause = execution.fallback_cause
-                self._alerts.alert(
-                    "llm_fallback_used",
-                    {
-                        "requested_model": request.model,
-                        "model_used": execution.model_used,
-                        "request_id": request.request_id,
-                        "error_type": cause.error_type if cause else None,
-                        "error_message": cause.error_message if cause else None,
-                        "failure_phase": (
-                            cause.failure_phase.value
-                            if cause is not None and cause.failure_phase is not None
-                            else None
-                        ),
-                        # The cause is the headline; a plan with a retry and
-                        # two models can fail three times for three different
-                        # reasons, and only the full list tells a provider
-                        # having a bad minute from a request nothing accepts.
-                        "failures": [_failure_fields(a) for a in execution.failures],
-                    },
-                )
+            # Booked before anything else runs: an alert hook that fails must
+            # not leave a paid call unrecorded.
             self._usage_sink.record(
                 execution_to_record(
                     execution,
@@ -276,9 +270,19 @@ class LLMGateway:
                     succeeded=True,
                 )
             )
+            if execution.fallback_used:
+                self._alerts.alert(
+                    "llm_fallback_used",
+                    fallback_alert_fields(
+                        requested_model=request.model,
+                        model_used=execution.model_used,
+                        request_id=request.request_id,
+                        attempts=execution.attempts,
+                    ),
+                )
             self._events.emit("llm_call_succeeded", _event_fields(request, execution, cost))
             return LLMResult(
-                output=output,
+                output=outcome.output,
                 usage=usage,
                 execution=execution,
                 cost=cost,
@@ -298,14 +302,14 @@ class LLMGateway:
         request: LLMRequest,
         attempts: list[Attempt],
         *,
-        started: float | None = None,
+        started: float,
     ) -> None:
         """Emit accounting for a call that never produced a result.
 
         A failure still spent money, so it is reported exactly like a success.
         """
         usage, cost = _aggregate(attempts)
-        elapsed_ms = int((time.perf_counter() - started) * 1000) if started is not None else 0
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
         failed = Execution(
             requested_model=request.model,
             model_used=attempts[-1].model if attempts else request.model,
@@ -331,14 +335,15 @@ class LLMGateway:
         request: LLMRequest,
         *,
         model: str,
+        adapter: ProviderAdapter,
         attempts: list[Attempt],
+        deadline: float | None,
     ) -> _Completion | LLMGatewayError:
         """Try one model until its retry policy is exhausted.
 
         Returns the completion, or the failure that ended this model's turn —
         which the caller uses to decide whether a fallback still applies.
         """
-        adapter = self._registry.resolve(model)
         policy = request.retry_policy
 
         for attempt_number in range(1, policy.max_attempts + 1):
@@ -353,6 +358,32 @@ class LLMGateway:
                 failure.__cause__ = error
             except LLMGatewayError as error:
                 failure = error
+            except asyncio.CancelledError:
+                # The call's total budget cut this attempt off mid-flight. The
+                # provider already has the request and may invoice it, so it
+                # is recorded before the cancellation carries on unwinding.
+                attempts.append(
+                    new_attempt(
+                        Attempt,
+                        index=len(attempts) + 1,
+                        model=model,
+                        provider=adapter.name,
+                        outcome=AttemptOutcome.FAILED,
+                        usage=TokenUsage.unknown(),
+                        cost=Cost.unavailable(),
+                        started=attempt_started,
+                        error_type=ProviderTimeoutError.__name__,
+                        error_message="the call's total budget ran out during this attempt",
+                        failure_phase=FailurePhase.TIMEOUT,
+                    )
+                )
+                raise
+            except Exception as error:
+                # An adapter is meant to map what it raises, and one that did
+                # not has still sent the request. Classified structurally, it
+                # is a failed attempt like any other: recorded, and the
+                # fallback still gets its turn instead of a bare crash.
+                failure = classify_provider_error(error)
             else:
                 usage = response.usage
                 cost = self._prices.estimate(model, usage)
@@ -363,7 +394,8 @@ class LLMGateway:
                     # tokens it reported are recorded exactly as on a success.
                     # What is not recorded is a result: this attempt failed.
                     attempts.append(
-                        _record_attempt(
+                        new_attempt(
+                            Attempt,
                             index=len(attempts) + 1,
                             model=model,
                             provider=adapter.name,
@@ -373,7 +405,7 @@ class LLMGateway:
                             started=attempt_started,
                             error_type=type(unusable).__name__,
                             error_message=message_of(unusable),
-                            failure_phase=_phase_of(unusable),
+                            failure_phase=phase_of(unusable),
                         )
                     )
                     # Deliberately not retried on the same model: the same
@@ -383,7 +415,8 @@ class LLMGateway:
                     return unusable
 
                 attempts.append(
-                    _record_attempt(
+                    new_attempt(
+                        Attempt,
                         index=len(attempts) + 1,
                         model=model,
                         provider=adapter.name,
@@ -396,7 +429,8 @@ class LLMGateway:
                 return _Completion(response=response, output=output, tool_calls=tool_calls)
 
             attempts.append(
-                _record_attempt(
+                new_attempt(
+                    Attempt,
                     index=len(attempts) + 1,
                     model=model,
                     provider=adapter.name,
@@ -409,69 +443,25 @@ class LLMGateway:
                     error_type=type(failure).__name__,
                     error_message=message_of(failure),
                     billable=isinstance(failure, ProviderError),
-                    failure_phase=_phase_of(failure),
+                    failure_phase=phase_of(failure),
                 )
             )
             if not policy.should_retry(failure, attempt_number=attempt_number):
                 return failure
             delay = policy.delay_before(attempt_number=attempt_number)
             if delay:
+                # A pause the budget cannot cover would end the call as a
+                # timeout and bury the error that actually stopped it.
+                if deadline is not None and asyncio.get_running_loop().time() + delay >= deadline:
+                    return failure
                 await asyncio.sleep(delay)
         return failure
 
 
-def _record_attempt(
-    *,
-    index: int,
-    model: str,
-    provider: str,
-    outcome: AttemptOutcome,
-    usage: TokenUsage,
-    cost: Cost,
-    started: float,
-    error_type: str | None = None,
-    error_message: str | None = None,
-    billable: bool = True,
-    failure_phase: FailurePhase | None = None,
-) -> Attempt:
-    return Attempt(
-        index=index,
-        model=model,
-        provider=provider,
-        outcome=outcome,
-        usage=usage,
-        cost=cost,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        error_type=error_type,
-        error_message=error_message,
-        billable=billable,
-        failure_phase=failure_phase,
+def _aggregate(attempts: list[Attempt]) -> tuple[TokenUsage, Cost]:
+    return aggregate(
+        attempts, unknown_usage=TokenUsage.unknown(), unavailable_cost=Cost.unavailable()
     )
-
-
-def _failure_fields(attempt: Attempt) -> dict[str, object]:
-    """One failed attempt, flattened for a log line."""
-    return {
-        "attempt": attempt.index,
-        "model": attempt.model,
-        "provider": attempt.provider,
-        "error_type": attempt.error_type,
-        "error_message": attempt.error_message,
-        "failure_phase": attempt.failure_phase.value if attempt.failure_phase else None,
-    }
-
-
-def _phase_of(failure: LLMGatewayError) -> FailurePhase:
-    """Classify structurally, so a consumer never has to parse a message."""
-    if isinstance(failure, ConfigurationError):
-        return FailurePhase.CONFIGURATION
-    if isinstance(failure, SchemaValidationError):
-        return FailurePhase.SCHEMA_VALIDATION
-    if isinstance(failure, OutputError):
-        return FailurePhase.OUTPUT_PARSING
-    if isinstance(failure, ProviderTimeoutError):
-        return FailurePhase.TIMEOUT
-    return FailurePhase.PROVIDER
 
 
 def _request_for_model(request: LLMRequest, model: str) -> LLMRequest:
@@ -497,29 +487,28 @@ def _request_for_model(request: LLMRequest, model: str) -> LLMRequest:
     return replace(request, **changes) if changes else request
 
 
+_EFFORT_ORDER: tuple[ReasoningEffort, ...] = get_args(ReasoningEffort)
+
+
 def _effort_for_model(request: LLMRequest, info: ModelInfo | None) -> ReasoningEffort | None:
+    """The supported effort nearest to the one asked for, ties going cheaper.
+
+    Nearest rather than a fixed middle: ``none`` becoming ``medium`` would bill
+    the cheapest request mid-range, and ``max`` becoming ``medium`` would
+    quietly halve it.
+    """
     effort = request.reasoning_effort
-    if effort is None or (info is not None and effort in info.reasoning_efforts):
-        return effort
-    if info is not None and "medium" in info.reasoning_efforts:
-        return "medium"
     # Unknown and non-thinking models must not receive a provider-specific
     # reasoning field that the API may reject.
-    return None
-
-
-def _aggregate(attempts: list[Attempt]) -> tuple[TokenUsage, Cost]:
-    """Sum every billable attempt, so a retry is never invisible in the total."""
-    billable = [a for a in attempts if a.billable]
-    if not billable:
-        return TokenUsage.unknown(), Cost.unavailable()
-
-    usage = billable[0].usage
-    cost = billable[0].cost
-    for attempt in billable[1:]:
-        usage = usage.merge(attempt.usage)
-        cost = cost.merge(attempt.cost)
-    return usage, cost
+    if effort is None or info is None or not info.reasoning_efforts:
+        return None
+    if effort in info.reasoning_efforts:
+        return effort
+    wanted = _EFFORT_ORDER.index(effort)
+    return min(
+        info.reasoning_efforts,
+        key=lambda option: (abs(_EFFORT_ORDER.index(option) - wanted), _EFFORT_ORDER.index(option)),
+    )
 
 
 def _interpret(
@@ -539,6 +528,12 @@ def _interpret(
 
     payload = parse_json_payload(response.output_text)
     if request.response_format is ResponseFormat.JSON_OBJECT:
+        # A provider without an enforced JSON mode can answer `42` or `true`,
+        # which parses and is still not the object the caller was promised.
+        if not isinstance(payload, dict):
+            raise OutputParsingError(
+                f"the model returned a JSON {type(payload).__name__} where an object was required"
+            )
         return payload, ()
 
     schema = request.response_schema
@@ -577,9 +572,15 @@ def _tool_calls(response: ProviderResponse, request: LLMRequest) -> tuple[ToolCa
     """
     declared = {tool.name for tool in request.tools}
     calls: list[ToolCall] = []
+    seen_ids: set[str] = set()
     for raw in response.tool_calls:
         if not isinstance(raw.id, str) or not raw.id.strip():
             raise OutputParsingError("the provider returned a tool call without a correlation id")
+        # Two results for one id cannot be told apart, and the continuation
+        # replaying them is refused only after this answer has been paid for.
+        if raw.id in seen_ids:
+            raise OutputParsingError("the provider returned two tool calls with one correlation id")
+        seen_ids.add(raw.id)
         if raw.name not in declared:
             raise OutputParsingError(
                 f"the provider called {raw.name!r}, which this request did not declare"

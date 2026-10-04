@@ -28,9 +28,7 @@ def parse_json_payload(text: str | None) -> Any:
     fenced = _FENCE.search(text)
     if fenced:
         candidates.insert(0, fenced.group("body"))
-    trimmed = _largest_braced_span(text)
-    if trimmed is not None:
-        candidates.append(trimmed)
+    candidates.extend(_outermost_spans(text))
 
     for candidate in candidates:
         try:
@@ -43,11 +41,18 @@ def parse_json_payload(text: str | None) -> Any:
     )
 
 
-def _largest_braced_span(text: str) -> str | None:
-    """The outermost {...} or [...] span, for replies padded with prose."""
+def _outermost_spans(text: str) -> list[str]:
+    """The outermost {...} and [...] spans, the one that opens first first.
+
+    Both are tried: in ``[{"a": 1}, {"b": 2}]`` the outermost braces enclose
+    two sibling objects, which is not JSON, and only the brackets parse. And
+    the order follows the text, so the list in ``[{"a": 1}]`` is not mistaken
+    for the object inside it.
+    """
+    spans = []
     for opener, closer in (("{", "}"), ("[", "]")):
         start = text.find(opener)
         end = text.rfind(closer)
         if start != -1 and end > start:
-            return text[start : end + 1]
-    return None
+            spans.append((start, text[start : end + 1]))
+    return [span for _, span in sorted(spans)]

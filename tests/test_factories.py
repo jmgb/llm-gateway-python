@@ -2,6 +2,7 @@
 
 import sys
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -40,6 +41,26 @@ def test_each_provider_names_its_own_extra(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setitem(sys.modules, "groq", None)
     with pytest.raises(ProviderNotInstalled, match=r"\[groq\]"):
         create_groq_client(api_key="unused")
+
+
+@pytest.mark.parametrize(
+    ("module", "client_class", "factory"),
+    [
+        ("openai", "AsyncOpenAI", create_openai_client),
+        ("openai", "AsyncOpenAI", create_openrouter_client),
+        ("groq", "AsyncGroq", create_groq_client),
+    ],
+)
+def test_sdk_clients_leave_retrying_to_the_gateway(
+    monkeypatch: pytest.MonkeyPatch, module: str, client_class: str, factory: Any
+) -> None:
+    """These SDKs retry twice by default, inside one gateway attempt: retries
+    no attempt records, that may each be billed, spending the attempt's timeout."""
+    fake = ModuleType(module)
+    setattr(fake, client_class, lambda **kwargs: kwargs)
+    monkeypatch.setitem(sys.modules, module, fake)
+
+    assert factory(api_key="unused")["max_retries"] == 0
 
 
 def test_assemblyai_client_is_constructed_from_an_explicit_key(
@@ -194,6 +215,33 @@ class TestOpenRouter:
 
         assert registry.resolve("google/gemini-3.1-pro-preview").name == "openrouter"
         assert registry.resolve("gemini-3.1-pro-preview").name == "gemini"
+
+    def test_a_catalogued_model_never_falls_through_to_another_providers_prefix(self) -> None:
+        """Groq's `qwen` prefix used to catch OpenRouter's `qwen/qwen3.8-max`:
+        the wrong API, billed at the wrong rate."""
+        from types import SimpleNamespace
+
+        from llm_gateway import UnknownModelError
+
+        registry = build_registry(groq_client=SimpleNamespace())
+
+        with pytest.raises(UnknownModelError, match="openrouter"):
+            registry.resolve("qwen/qwen3.8-max")
+
+    @pytest.mark.parametrize("model", ["gemini-2.5-flash", "openrouter/google/gemini-2.5-flash"])
+    def test_a_retired_gemini_generation_is_refused_whatever_the_prefixes(self, model: str) -> None:
+        from types import SimpleNamespace
+
+        from llm_gateway import UnknownModelError
+
+        registry = build_registry(
+            openai_client=SimpleNamespace(),
+            openrouter_client=SimpleNamespace(),
+            extra_openai_prefixes=("gemini",),
+        )
+
+        with pytest.raises(UnknownModelError, match="Gemini"):
+            registry.resolve(model)
 
     def test_without_the_client_the_error_names_the_missing_provider(self) -> None:
         from types import SimpleNamespace

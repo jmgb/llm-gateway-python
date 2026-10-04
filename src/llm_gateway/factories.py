@@ -50,6 +50,12 @@ application's call: ``registry.register(adapter, model_prefixes=("prunaai/",))``
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
+_NO_SDK_RETRIES = 0
+"""The OpenAI and Groq SDKs retry twice by default, inside one gateway attempt.
+Those retries may each be billed, appear in no attempt record and spend the
+attempt's timeout, so ``RetryPolicy`` is kept as the only retry layer."""
+
+
 def _require_key(api_key: str) -> None:
     if not api_key or not api_key.strip():
         raise ValueError("api_key must be a non-empty string")
@@ -68,8 +74,8 @@ def create_openai_client(*, api_key: str, base_url: str | None = None) -> Any:
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("openai") from error
     if base_url:
-        return AsyncOpenAI(api_key=api_key, base_url=base_url)
-    return AsyncOpenAI(api_key=api_key)
+        return AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=_NO_SDK_RETRIES)
+    return AsyncOpenAI(api_key=api_key, max_retries=_NO_SDK_RETRIES)
 
 
 def create_openrouter_client(*, api_key: str, base_url: str = OPENROUTER_BASE_URL) -> Any:
@@ -85,7 +91,7 @@ def create_openrouter_client(*, api_key: str, base_url: str = OPENROUTER_BASE_UR
         from openai import AsyncOpenAI
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("openrouter") from error
-    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+    return AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=_NO_SDK_RETRIES)
 
 
 def create_gemini_client(*, api_key: str) -> Any:
@@ -105,7 +111,7 @@ def create_groq_client(*, api_key: str) -> Any:
         from groq import AsyncGroq
     except ImportError as error:
         raise ProviderNotInstalled.for_provider("groq") from error
-    return AsyncGroq(api_key=api_key)
+    return AsyncGroq(api_key=api_key, max_retries=_NO_SDK_RETRIES)
 
 
 def create_assemblyai_client(*, api_key: str) -> Any:

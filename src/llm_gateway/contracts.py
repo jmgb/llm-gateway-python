@@ -171,7 +171,10 @@ class Attempt:
     alert does not have to reproduce the call to find out.
     """
     billable: bool = True
-    """False only when the call never reached the provider."""
+    """False only when the failure is known to precede the provider, such as a
+    configuration error. A provider error counts as billable even when it may
+    not have been delivered — a refused connection, say — because an unknown
+    charge is not a known zero."""
     failure_phase: FailurePhase | None = None
     """``None`` on a successful attempt, and only then."""
 

@@ -1,5 +1,7 @@
 """Typed errors, and the policies that decide what to do about them."""
 
+import math
+
 import pytest
 
 from llm_gateway import (
@@ -129,3 +131,27 @@ class TestAllAttemptsFailed:
 
         assert isinstance(error, LLMGatewayError)
         assert error.attempts == ()
+
+
+class TestPoliciesRefuseNumbersThatAreNotDurations:
+    @pytest.mark.parametrize("seconds", [math.nan, math.inf])
+    def test_a_total_timeout_must_be_finite(self, seconds: float) -> None:
+        """`asyncio.timeout(nan)` fires at once, so every call would fail."""
+        with pytest.raises(ValueError):
+            TimeoutPolicy(total_seconds=seconds)
+
+    @pytest.mark.parametrize("seconds", [math.nan, math.inf])
+    def test_a_per_attempt_timeout_must_be_finite(self, seconds: float) -> None:
+        with pytest.raises(ValueError):
+            TimeoutPolicy(per_attempt_seconds_override=seconds)
+
+    @pytest.mark.parametrize("seconds", [math.nan, math.inf])
+    def test_a_backoff_must_be_finite(self, seconds: float) -> None:
+        """An infinite pause sleeps the whole budget away."""
+        with pytest.raises(ValueError):
+            RetryPolicy(max_attempts=2, base_delay_seconds=seconds)
+
+    def test_a_fallback_chain_needs_room_for_at_least_one_model(self) -> None:
+        """`limit=-1` used to slice off the cheapest candidate and keep the rest."""
+        with pytest.raises(ValueError):
+            FallbackPolicy.cheaper_than("gpt-6-sol", limit=-1)

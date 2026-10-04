@@ -375,13 +375,23 @@ class TestJSONRecovery:
         assert parse_json_payload('```json\n{"a": 1}\n```') == {"a": 1}
 
     def test_a_payload_padded_with_prose_is_recovered(self) -> None:
-        assert parse_json_payload('Claro:\n{"a": 1}\nEspero que sirva.') == {"a": 1}
+        assert parse_json_payload('Sure:\n{"a": 1}\nHope this helps.') == {"a": 1}
 
     def test_a_plain_payload_is_returned_unchanged(self) -> None:
         assert parse_json_payload('{"a": 1}') == {"a": 1}
 
     def test_an_array_payload_is_supported(self) -> None:
         assert parse_json_payload("[1, 2]") == [1, 2]
+
+    def test_an_array_of_objects_padded_with_prose_is_recovered(self) -> None:
+        # The outermost braces span two sibling objects, which is not JSON; the
+        # brackets around them are, and must still get their turn.
+        text = 'Here you go:\n[{"a": 1}, {"b": 2}]\nDone.'
+        assert parse_json_payload(text) == [{"a": 1}, {"b": 2}]
+
+    def test_the_bracket_that_opens_first_is_the_payload(self) -> None:
+        """The object inside a list is not the answer; the list around it is."""
+        assert parse_json_payload('Here: [{"a": 1}] ok') == [{"a": 1}]
 
     def test_an_empty_response_is_an_error_not_an_empty_dict(self) -> None:
         with pytest.raises(OutputParsingError):

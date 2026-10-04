@@ -58,7 +58,9 @@ def builtin_price_catalog(
     resolved_version = version or CATALOG_VERSION
 
     if overrides:
-        if version is None:
+        # Blank counts as missing: `""` would otherwise fall back to the
+        # shared version below and label custom rates with it.
+        if version is None or not version.strip():
             raise ValueError(
                 "overriding prices requires a version identifying your own table, "
                 f"so an amount is never attributed to {CATALOG_VERSION!r}"

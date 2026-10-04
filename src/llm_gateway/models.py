@@ -135,7 +135,11 @@ class ModelInfo:
         if self.modality != "image":
             raise ValueError(f"{self.id!r} does not generate images")
         if self.pricing_unit == "tokens":
-            output_rate = self.image_output_usd_per_mtok or self.output_usd_per_mtok
+            output_rate = (
+                self.output_usd_per_mtok
+                if self.image_output_usd_per_mtok is None
+                else self.image_output_usd_per_mtok
+            )
             return ImageRate(
                 token_rate=ModelRate(
                     input_microusd_per_token=self.input_usd_per_mtok,
@@ -211,8 +215,9 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # These OpenAI reasoning models reject `temperature`: reasoning replaces it,
     # and sending it fails the whole call. A fallback onto one of these must not
     # inherit it.
-    # Superseded by gpt-6.1-sol at the same rates (cheaper cache reads).
-    # Kept resolvable for pinned callers; deprecated so no fallback picks it.
+    #
+    # gpt-6-sol is superseded by gpt-6.1-sol at the same rates. Kept resolvable
+    # for pinned callers; deprecated so no fallback picks it.
     _m(
         "gpt-6-sol",
         "openai",
@@ -222,7 +227,8 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
-    # Latest Sol generation: same rates as gpt-6-sol, cheaper cache reads.
+    # Latest Sol generation, at gpt-6-sol's rates. Its cheaper cache reads are
+    # not modelled: cached input is priced at the full input rate.
     _m(
         "gpt-6.1-sol",
         "openai",
@@ -719,7 +725,9 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     ),
 )
 
-MODEL_CATALOG: dict[str, ModelInfo] = {entry.id: entry for entry in _ENTRIES}
+MODEL_CATALOG: Mapping[str, ModelInfo] = MappingProxyType({entry.id: entry for entry in _ENTRIES})
+"""Read-only: a consumer repricing an entry in place would reprice it for every
+gateway in the process. Negotiated rates go through ``builtin_price_catalog``."""
 
 
 def lookup_model(model_id: str) -> ModelInfo | None:
@@ -745,7 +753,7 @@ def resolve_provider(model_id: str) -> Provider | None:
     unknown id returns ``None`` rather than being guessed into the wrong
     provider.
     """
-    if _is_non_three_gemini_model(model_id):
+    if is_retired_gemini_model(model_id):
         return None
 
     catalogued = MODEL_CATALOG.get(model_id)
@@ -758,7 +766,7 @@ def resolve_provider(model_id: str) -> Provider | None:
     return None
 
 
-def _is_non_three_gemini_model(model_id: str) -> bool:
+def is_retired_gemini_model(model_id: str) -> bool:
     """Keep removed Gemini generations out of both direct and namespaced routes."""
     for component in model_id.lower().split("/"):
         if not component.startswith("gemini-"):

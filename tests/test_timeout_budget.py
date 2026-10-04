@@ -22,6 +22,7 @@ from llm_gateway import (
     ProviderResponse,
     RetryPolicy,
     TimeoutPolicy,
+    UsageRecord,
 )
 
 
@@ -116,3 +117,37 @@ class TestTotalBudget:
             )
 
         assert adapter.calls == 3, "each attempt should be cut individually, not the whole call"
+
+
+class RecordingSink:
+    def __init__(self) -> None:
+        self.records: list[UsageRecord] = []
+
+    def record(self, usage: UsageRecord) -> None:
+        self.records.append(usage)
+
+
+class TestTheAttemptTheBudgetCutShort:
+    async def test_an_attempt_in_flight_when_the_budget_runs_out_is_still_counted(self) -> None:
+        """The provider received the call and may invoice it; it is an attempt."""
+        with pytest.raises(AllAttemptsFailed) as caught:
+            await _gateway(SlowAdapter()).generate(
+                _request(timeout_policy=TimeoutPolicy(total_seconds=0.10))
+            )
+
+        (attempt,) = caught.value.attempts
+        assert attempt.error_type == "ProviderTimeoutError"
+        assert attempt.billable
+
+    async def test_the_failure_record_states_how_long_the_call_ran(self) -> None:
+        registry = ProviderRegistry()
+        registry.register(SlowAdapter(), model_prefixes=("slow",))
+        sink = RecordingSink()
+        gateway = LLMGateway(registry=registry, usage_sink=sink)
+
+        with pytest.raises(AllAttemptsFailed):
+            await gateway.generate(_request(timeout_policy=TimeoutPolicy(total_seconds=0.10)))
+
+        (record,) = sink.records
+        assert record.latency_ms >= 90
+        assert record.attempts == 1

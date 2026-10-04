@@ -9,7 +9,7 @@ No error message may contain credentials, prompts or response content.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from llm_gateway.audio import AudioAttempt
@@ -113,72 +113,55 @@ class SchemaValidationError(OutputError):
     """The payload parsed, but did not satisfy the requested schema."""
 
 
-class AllAttemptsFailed(LLMGatewayError):
+class _FailedAttempt(Protocol):
+    @property
+    def error_type(self) -> str | None: ...
+    @property
+    def error_message(self) -> str | None: ...
+
+
+_AttemptT = TypeVar("_AttemptT", bound=_FailedAttempt)
+
+
+class _Exhausted(LLMGatewayError, Generic[_AttemptT]):
+    """What every exhausted call carries: the attempts it paid for, in order."""
+
+    def __init__(self, message: str, *, attempts: tuple[_AttemptT, ...]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+    @property
+    def last_error(self) -> str | None:
+        return self.attempts[-1].error_type if self.attempts else None
+
+    @property
+    def last_error_message(self) -> str | None:
+        """What the final failure said, not just which class it belonged to."""
+        return self.attempts[-1].error_message if self.attempts else None
+
+
+class AllAttemptsFailed(_Exhausted["Attempt"]):
     """Every model and every retry failed.
 
     ``attempts`` preserves what was spent, so a failed call is still auditable.
     """
 
-    def __init__(self, message: str, *, attempts: tuple[Attempt, ...]) -> None:
-        super().__init__(message)
-        self.attempts = attempts
-
-    @property
-    def last_error(self) -> str | None:
-        return self.attempts[-1].error_type if self.attempts else None
-
-    @property
-    def last_error_message(self) -> str | None:
-        """What the final failure said, not just which class it belonged to."""
-        return self.attempts[-1].error_message if self.attempts else None
+    attempts: tuple[Attempt, ...]
 
 
-class AllTranscriptionsFailed(LLMGatewayError):
+class AllTranscriptionsFailed(_Exhausted["AudioAttempt"]):
     """Every audio model and retry failed, with duration accounting preserved."""
 
-    def __init__(self, message: str, *, attempts: tuple[AudioAttempt, ...]) -> None:
-        super().__init__(message)
-        self.attempts = attempts
-
-    @property
-    def last_error(self) -> str | None:
-        return self.attempts[-1].error_type if self.attempts else None
-
-    @property
-    def last_error_message(self) -> str | None:
-        """What the final failure said, not just which class it belonged to."""
-        return self.attempts[-1].error_message if self.attempts else None
+    attempts: tuple[AudioAttempt, ...]
 
 
-class AllImagesFailed(LLMGatewayError):
+class AllImagesFailed(_Exhausted["ImageAttempt"]):
     """Every image model and retry failed, with image accounting preserved."""
 
-    def __init__(self, message: str, *, attempts: tuple[ImageAttempt, ...]) -> None:
-        super().__init__(message)
-        self.attempts = attempts
-
-    @property
-    def last_error(self) -> str | None:
-        return self.attempts[-1].error_type if self.attempts else None
-
-    @property
-    def last_error_message(self) -> str | None:
-        """What the final failure said, not just which class it belonged to."""
-        return self.attempts[-1].error_message if self.attempts else None
+    attempts: tuple[ImageAttempt, ...]
 
 
-class AllVideosFailed(LLMGatewayError):
+class AllVideosFailed(_Exhausted["VideoAttempt"]):
     """Every video model and retry failed, with video accounting preserved."""
 
-    def __init__(self, message: str, *, attempts: tuple[VideoAttempt, ...]) -> None:
-        super().__init__(message)
-        self.attempts = attempts
-
-    @property
-    def last_error(self) -> str | None:
-        return self.attempts[-1].error_type if self.attempts else None
-
-    @property
-    def last_error_message(self) -> str | None:
-        """What the final failure said, not just which class it belonged to."""
-        return self.attempts[-1].error_message if self.attempts else None
+    attempts: tuple[VideoAttempt, ...]

@@ -234,7 +234,7 @@ class TestIdentity:
         for model_id, info in MODEL_CATALOG.items():
             assert info.id == model_id
 
-    def test_gemini_37_is_catalogued_direct_and_on_openrouter(self) -> None:
+    def test_gemini_3_8_flash_is_catalogued_direct_and_on_openrouter(self) -> None:
         expected = {
             "gemini-3.8-flash": "gemini",
             "google/gemini-3.8-flash": "openrouter",
@@ -248,7 +248,7 @@ class TestIdentity:
             assert info.output_usd_per_mtok == Decimal("3.75")
             assert info.deprecated is False
 
-    def test_gemini_36_remains_catalogued_as_deprecated(self) -> None:
+    def test_gemini_3_6_flash_remains_catalogued_as_deprecated(self) -> None:
         for model_id in ("gemini-3.6-flash", "google/gemini-3.6-flash"):
             info = lookup_model(model_id)
             assert info is not None
@@ -400,6 +400,26 @@ class TestBuiltinPrices:
         assert cost.amount_usd == Decimal("9.000000")
         assert cost.pricing_version == "my-negotiated-rates-2026-07"
 
+    @pytest.mark.parametrize("version", ["", "   "])
+    def test_a_blank_version_cannot_pass_custom_rates_off_as_the_shared_table(
+        self, version: str
+    ) -> None:
+        """An empty string used to slip past the check and be labelled with
+        CATALOG_VERSION — the misattribution the check exists to prevent."""
+        with pytest.raises(ValueError, match="version"):
+            builtin_price_catalog(
+                overrides={"gemini-3.5-flash-lite": (Decimal("9"), Decimal("9"))},
+                version=version,
+            )
+
+    def test_the_shared_catalogue_cannot_be_repriced_in_place(self) -> None:
+        """One import changing a rate would change it for every gateway in the process."""
+        info = lookup_model("gpt-6-luna")
+        assert info is not None
+
+        with pytest.raises(TypeError):
+            MODEL_CATALOG["gpt-6-luna"] = replace(info, input_usd_per_mtok=Decimal("0"))  # type: ignore[index]
+
 
 class TestPricesMatchTheDeclaredCatalogue:
     """USD per million tokens and microUSD per token are the same number."""
@@ -491,7 +511,7 @@ class TestPricesAndVersionMoveTogether:
     """
 
     PRICED_AT_VERSION = "2026-09-30.1"
-    PRICE_FINGERPRINT = "a2fb580423e04b7eb1d288986dccec6bd85789f2929ef49088b10136297f6bc4"
+    PRICE_FINGERPRINT = "d9ad047cae0cdd9cdfc5af8b378ea82ee74ae122e8bab4b081f12261bbbfb7ec"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -516,6 +536,7 @@ class TestPricesAndVersionMoveTogether:
             f"\t{(info.image_input_usd_per_mtok or Decimal('0')).quantize(micro)}"
             f"\t{(info.video_usd_per_second or Decimal('0')).quantize(micro)}"
             f"\t{by_resolution(info)}"
+            f"\t{info.audio_minimum_seconds}"
             for info in MODEL_CATALOG.values()
         )
         return hashlib.sha256("\n".join(priced).encode()).hexdigest()
@@ -534,7 +555,7 @@ class TestPricesAndVersionMoveTogether:
 class TestDeclaredRequestOptions:
     """What a model accepts is declared, never inferred from its id."""
 
-    def test_the_openai_56_family_declares_that_it_rejects_temperature(self) -> None:
+    def test_the_openai_reasoning_models_declare_that_they_reject_temperature(self) -> None:
         for model_id in ("gpt-6-sol", "gpt-6.1-sol", "gpt-5.6-terra", "gpt-6-luna"):
             info = lookup_model(model_id)
             assert info is not None

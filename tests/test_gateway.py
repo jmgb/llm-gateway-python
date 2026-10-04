@@ -16,6 +16,7 @@ from llm_gateway import (
     AllAttemptsFailed,
     AttemptOutcome,
     AuthenticationError,
+    ConfigurationError,
     CostMeasurement,
     FailurePhase,
     FallbackPolicy,
@@ -31,6 +32,7 @@ from llm_gateway import (
     RetryPolicy,
     SchemaValidationError,
     StaticPriceCatalog,
+    TimeoutPolicy,
     TokenUsage,
     UnknownModelError,
 )
@@ -324,7 +326,9 @@ class TestReasoningEffortRouting:
 
         assert adapter.calls == ["gemini-3.5-flash"]
 
-    async def test_an_unsupported_effort_is_downgraded_for_gemini_3_pro(self) -> None:
+    async def test_an_unsupported_effort_moves_to_the_nearest_one_gemini_3_pro_offers(
+        self,
+    ) -> None:
         adapter = FakeAdapter(_ok("x"))
         adapter.name = "gemini"
         registry = ProviderRegistry()
@@ -333,9 +337,24 @@ class TestReasoningEffortRouting:
 
         await gateway.generate(_request(model="gemini-3.1-pro-preview", reasoning_effort="max"))
 
-        assert adapter.requests[0].reasoning_effort == "medium"
+        assert adapter.requests[0].reasoning_effort == "high"
 
-    async def test_an_unsupported_effort_is_downgraded_before_a_groq_fallback(self) -> None:
+    @pytest.mark.parametrize("effort", ("none", "minimal"))
+    async def test_asking_for_little_reasoning_never_buys_more_than_the_floor(
+        self, effort: str
+    ) -> None:
+        """`none` used to become `medium`: the cheapest request, billed mid-range."""
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "gemini"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=("gemini-",))
+        gateway = LLMGateway(registry=registry)
+
+        await gateway.generate(_request(model="gemini-3.1-pro-preview", reasoning_effort=effort))
+
+        assert adapter.requests[0].reasoning_effort == "low"
+
+    async def test_an_unsupported_effort_is_adapted_before_a_groq_fallback(self) -> None:
         primary = FakeAdapter(RateLimitedError("429"))
         primary.name = "openai"
         fallback = FakeAdapter(_ok("fallback answer"))
@@ -355,7 +374,7 @@ class TestReasoningEffortRouting:
 
         assert result.output == "fallback answer"
         assert primary.requests[0].reasoning_effort == "max"
-        assert fallback.requests[0].reasoning_effort == "medium"
+        assert fallback.requests[0].reasoning_effort == "high"
 
     async def test_reasoning_effort_is_removed_for_a_model_without_reasoning_support(self) -> None:
         adapter = FakeAdapter(_ok("x"))
@@ -368,7 +387,7 @@ class TestReasoningEffortRouting:
 
         assert adapter.requests[0].reasoning_effort is None
 
-    async def test_reasoning_effort_is_allowed_for_openai_56_models(self) -> None:
+    async def test_reasoning_effort_is_allowed_for_gpt_5_6_terra(self) -> None:
         adapter = FakeAdapter(_ok("x"))
         adapter.name = "openai"
         registry = ProviderRegistry()
@@ -507,3 +526,73 @@ class TestFailureAccounting:
 
         assert len(caught.value.attempts) == 2
         assert caught.value.last_error == "RateLimitedError"
+
+
+class RaisingSink:
+    """A sink whose own backend times out, as a database write can."""
+
+    def __init__(self) -> None:
+        self.records: list[object] = []
+
+    def record(self, usage: object) -> None:
+        self.records.append(usage)
+        raise TimeoutError("the usage database did not answer")
+
+
+class TestFailuresThatAreNotTheProviders:
+    async def test_a_sink_timeout_is_not_mistaken_for_the_call_exceeding_its_budget(
+        self,
+    ) -> None:
+        """The call succeeded; reporting it again as failed would bill it twice."""
+        sink = RaisingSink()
+        registry = ProviderRegistry()
+        registry.register(FakeAdapter(_ok("x")), model_prefixes=("fast",))
+        gateway = LLMGateway(registry=registry, price_catalog=CATALOG, usage_sink=sink)
+
+        with pytest.raises(TimeoutError, match="usage database"):
+            await gateway.generate(_request())
+
+        assert len(sink.records) == 1
+
+    async def test_an_unexpected_adapter_exception_is_a_failed_attempt_not_a_crash(
+        self,
+    ) -> None:
+        """A paid retry before it must still reach the books, and the fallback its turn."""
+        adapter = FakeAdapter(KeyError("choices"), _ok("from the fallback"))
+
+        result = await _gateway(adapter).generate(
+            _request(fallback_policy=FallbackPolicy.models_in_order("slow"))
+        )
+
+        assert result.output == "from the fallback"
+        first = result.execution.attempts[0]
+        assert first.outcome is AttemptOutcome.FAILED
+        assert first.failure_phase is FailurePhase.PROVIDER
+
+    async def test_a_backoff_longer_than_the_remaining_budget_surfaces_the_real_error(
+        self,
+    ) -> None:
+        """Sleeping into the deadline would report a timeout and hide the 429."""
+        adapter = FakeAdapter(RateLimitedError("429"), _ok("never reached"))
+
+        with pytest.raises(AllAttemptsFailed) as raised:
+            await _gateway(adapter).generate(
+                _request(
+                    timeout_policy=TimeoutPolicy(total_seconds=0.5),
+                    retry_policy=RetryPolicy.transient(max_attempts=2, base_delay_seconds=5),
+                )
+            )
+
+        assert isinstance(raised.value.__cause__, RateLimitedError)
+        assert adapter.calls == ["fast"]
+
+
+class TestJSONObjectMeansAnObject:
+    @pytest.mark.parametrize("reply", ["42", "true", "[1, 2]", '"text"'])
+    async def test_a_json_value_that_is_not_an_object_is_unusable(self, reply: str) -> None:
+        adapter = FakeAdapter(_ok(reply))
+
+        with pytest.raises(AllAttemptsFailed) as raised:
+            await _gateway(adapter).generate(_request(response_format=ResponseFormat.JSON_OBJECT))
+
+        assert raised.value.attempts[0].failure_phase is FailurePhase.OUTPUT_PARSING

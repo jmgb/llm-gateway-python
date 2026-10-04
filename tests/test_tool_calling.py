@@ -245,6 +245,21 @@ class TestArgumentsThatCannotBeHandedOver:
 
         assert raised.value.attempts[0].failure_phase is FailurePhase.OUTPUT_PARSING
 
+    async def test_two_calls_sharing_one_correlation_id_fail_the_attempt(self) -> None:
+        """Their results could not be told apart, and the continuation that
+        replays them would be refused only after this answer was paid for."""
+        adapter = FakeAdapter(
+            _calls(
+                _provider_call("call_1", "get_weather", '{"city": "Madrid"}'),
+                _provider_call("call_1", "get_weather", '{"city": "Paris"}'),
+            )
+        )
+
+        with pytest.raises(AllAttemptsFailed) as raised:
+            await _gateway(adapter).generate(_request())
+
+        assert raised.value.attempts[0].failure_phase is FailurePhase.OUTPUT_PARSING
+
     async def test_a_call_without_its_provider_correlation_id_fails_the_attempt(self) -> None:
         adapter = FakeAdapter(_calls(_provider_call("", "get_weather", "{}")))
 
