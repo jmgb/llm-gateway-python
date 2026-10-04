@@ -42,8 +42,16 @@ _BY_STATUS: dict[int, type[ProviderError]] = {
 _BY_NAME_FRAGMENT: tuple[tuple[str, type[ProviderError]], ...] = (
     ("ratelimit", RateLimitedError),
     ("resourceexhausted", RateLimitedError),
+    # Before the connection fragments: httpx's ConnectTimeout names both, and
+    # OpenAI's APITimeoutError subclasses its APIConnectionError. A timeout is
+    # the more specific diagnosis, and the one the attempt's budget is about.
     ("timeout", ProviderTimeoutError),
     ("deadline", ProviderTimeoutError),
+    # The request got no answer at all — refused, reset, or hung up mid-reply
+    # (APIConnectionError, httpx's ConnectError and RemoteProtocolError). That
+    # is an outage from the caller's side, and another attempt may well land.
+    ("connect", ServiceUnavailableError),
+    ("remoteprotocol", ServiceUnavailableError),
     ("unavailable", ServiceUnavailableError),
     ("serviceunavailable", ServiceUnavailableError),
     ("internalserver", ServiceUnavailableError),

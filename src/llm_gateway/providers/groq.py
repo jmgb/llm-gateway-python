@@ -17,11 +17,11 @@ from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.errors import ConfigurationError
 from llm_gateway.providers.base import ProviderResponse
+from llm_gateway.providers.chat_completions import base_messages, first_choice
+from llm_gateway.providers.chat_completions import token_usage as _usage
 from llm_gateway.providers.error_mapping import classify_provider_error
-from llm_gateway.providers.schema_prompt import system_prompt_for
 from llm_gateway.providers.validation import reject_file_attachments
 from llm_gateway.tools import FunctionTool, ProviderToolCall, RequiredTool, ToolChoice
-from llm_gateway.usage import TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
     structured_outputs=False,
@@ -71,9 +71,9 @@ class GroqAdapter:
         try:
             raw = await self._client.chat.completions.create(**kwargs)
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
-        choice = _first_choice(raw)
+        choice = first_choice(raw)
         return ProviderResponse(
             output_text=getattr(getattr(choice, "message", None), "content", None),
             usage=_usage(getattr(raw, "usage", None)),
@@ -109,7 +109,7 @@ class GroqAdapter:
         try:
             raw = await self._client.audio.transcriptions.create(**kwargs)
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
         return normalize_provider_transcription(raw, request=request, model=model)
 
     def _build_messages(self, request: LLMRequest) -> list[dict[str, Any]]:
@@ -121,11 +121,7 @@ class GroqAdapter:
         It also rejects `json_object` outright when the messages never say
         "json", so both JSON formats need something said here.
         """
-        messages: list[dict[str, Any]] = []
-        system_prompt = system_prompt_for(request)
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.extend({"role": m.role, "content": m.content} for m in request.messages)
+        messages = base_messages(request)
 
         # One assistant turn holding every call it made, then one message per
         # result. A `tool` message whose id names no call above it is a 400.
@@ -186,36 +182,15 @@ def _tool_calls(choice: Any) -> tuple[ProviderToolCall, ...]:
     calls: list[ProviderToolCall] = []
     for raw in raw_calls:
         function = getattr(raw, "function", None)
-        name = getattr(function, "name", None)
-        if not name:
-            continue
         call_id = getattr(raw, "id", None)
         calls.append(
             ProviderToolCall(
                 id=str(call_id) if call_id else "",
-                name=name,
+                # Kept even when empty, as the OpenAI adapter does: skipping it
+                # would pass a malformed reply off as an answer with no calls,
+                # where the gateway would otherwise refuse it and count it.
+                name=getattr(function, "name", None) or "",
                 arguments=getattr(function, "arguments", "") or "",
             )
         )
     return tuple(calls)
-
-
-def _first_choice(raw: Any) -> Any:
-    choices = getattr(raw, "choices", None) or ()
-    return choices[0] if choices else None
-
-
-def _usage(raw: Any) -> TokenUsage:
-    if raw is None:
-        return TokenUsage.unknown()
-    return TokenUsage(
-        input_tokens=getattr(raw, "prompt_tokens", None),
-        # Chat Completions counts reasoning inside completion_tokens, so the
-        # breakdown changes no amount. It is read anyway: without it a thinking
-        # model looks like it returned every token it was billed for. Models
-        # that do not think report no details, and the breakdown stays unknown.
-        output_tokens=getattr(raw, "completion_tokens", None),
-        reasoning_tokens=getattr(
-            getattr(raw, "completion_tokens_details", None), "reasoning_tokens", None
-        ),
-    )

@@ -7,16 +7,20 @@ tests possible without a network and without any extra installed.
 
 from __future__ import annotations
 
+import re
+from enum import Enum
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 import pytest
+from pydantic import BaseModel
 
 from llm_gateway import (
     ConfigurationError,
     FileAttachment,
     LLMRequest,
     Message,
+    ProviderError,
     RateLimitedError,
     ResponseFormat,
     RoutingPreference,
@@ -26,6 +30,8 @@ from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.openrouter import OpenRouterAdapter
+
+T = TypeVar("T")
 
 
 class Recorder:
@@ -55,6 +61,18 @@ def _request(**kwargs: Any) -> LLMRequest:
 class TestOpenAIAdapter:
     def _client(self, recorder: Recorder) -> Any:
         return SimpleNamespace(responses=SimpleNamespace(create=recorder))
+
+    async def test_the_sdk_exception_survives_as_the_cause_for_local_debugging(self) -> None:
+        """The typed error carries no provider text; the original keeps it, as
+        ``__cause__``, for whoever is debugging with the traceback in hand."""
+        original = RuntimeError("the SDK's own account of what went wrong")
+
+        with pytest.raises(ProviderError) as raised:
+            await OpenAIAdapter(self._client(Recorder(error=original))).generate(
+                _request(), model="gpt-x"
+            )
+
+        assert raised.value.__cause__ is original
 
     async def test_it_returns_the_output_text(self) -> None:
         recorder = Recorder(
@@ -268,6 +286,26 @@ class TestOpenAIAdapter:
 
         assert "text" not in recorder.kwargs
 
+    async def test_a_generic_schema_is_named_the_way_the_api_allows(self) -> None:
+        """``Page[Item]`` is a 400: names are limited to ``[A-Za-z0-9_-]{1,64}``."""
+
+        class Item(BaseModel):
+            id: int
+
+        class Page(BaseModel, Generic[T]):
+            items: list[T]
+
+        recorder = Recorder(SimpleNamespace(output_text="{}", usage=None, status="completed"))
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(response_format=ResponseFormat.JSON_SCHEMA, response_schema=Page[Item]),
+            model="gpt-x",
+        )
+
+        name = recorder.kwargs["text"]["format"]["name"]
+        assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name), name
+        assert name.startswith("Page")
+
     async def test_a_model_outside_the_gpt_5_family_never_receives_verbosity(self) -> None:
         """Only the families that document the option can be sent it."""
         recorder = Recorder(SimpleNamespace(output_text="x", usage=None, status="completed"))
@@ -328,6 +366,7 @@ class TestGeminiAdapter:
         assert response.usage.visible_output_tokens == 9
 
     async def test_thoughts_alone_do_not_pass_for_a_complete_output_count(self) -> None:
+        """Without a total there is nothing to derive the visible part from."""
         recorder = Recorder(
             SimpleNamespace(
                 text="x",
@@ -346,6 +385,113 @@ class TestGeminiAdapter:
         assert response.usage.output_tokens is None
         assert response.usage.complete is False
 
+    async def test_billed_thinking_survives_a_reply_with_no_candidate_count(self) -> None:
+        """Gemini omits a zero candidate count — typically when thinking used
+        up ``max_output_tokens`` before any text was written. The thoughts were
+        still billed, and the total says how much else was: reading the
+        missing count as "unknown output" used to drop the whole bill."""
+        recorder = Recorder(
+            SimpleNamespace(
+                text=None,
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=20,
+                    candidates_token_count=None,
+                    thoughts_token_count=64,
+                    tool_use_prompt_token_count=None,
+                    total_token_count=84,
+                ),
+            )
+        )
+
+        response = await GeminiAdapter(self._client(recorder)).generate(
+            _request(), model="gemini-x"
+        )
+
+        assert response.usage.output_tokens == 64
+        assert response.usage.reasoning_tokens == 64
+        assert response.usage.visible_output_tokens == 0
+        assert response.usage.complete is True
+
+    async def test_tool_use_prompt_tokens_are_not_mistaken_for_output(self) -> None:
+        recorder = Recorder(
+            SimpleNamespace(
+                text=None,
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=20,
+                    candidates_token_count=None,
+                    thoughts_token_count=64,
+                    tool_use_prompt_token_count=6,
+                    total_token_count=90,
+                ),
+            )
+        )
+
+        response = await GeminiAdapter(self._client(recorder)).generate(
+            _request(), model="gemini-x"
+        )
+
+        assert response.usage.output_tokens == 64
+
+    async def test_a_total_smaller_than_its_parts_derives_nothing(self) -> None:
+        recorder = Recorder(
+            SimpleNamespace(
+                text=None,
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=20,
+                    candidates_token_count=None,
+                    thoughts_token_count=64,
+                    total_token_count=50,
+                ),
+            )
+        )
+
+        response = await GeminiAdapter(self._client(recorder)).generate(
+            _request(), model="gemini-x"
+        )
+
+        assert response.usage.output_tokens is None
+
+    async def test_the_finish_reason_reads_like_every_other_provider(self) -> None:
+        """The SDK hands back an enum, whose ``str()`` is ``FinishReason.STOP``."""
+
+        class FinishReason(Enum):
+            STOP = "STOP"
+
+        recorder = Recorder(
+            SimpleNamespace(
+                text="x",
+                usage_metadata=None,
+                candidates=[SimpleNamespace(finish_reason=FinishReason.STOP)],
+            )
+        )
+
+        response = await GeminiAdapter(self._client(recorder)).generate(
+            _request(), model="gemini-x"
+        )
+
+        assert response.finish_reason == "STOP"
+
+    async def test_a_schema_gemini_cannot_build_is_refused_before_the_call(self) -> None:
+        """A local failure is not a provider one: it must neither reach the
+        network nor be counted as a billable attempt."""
+
+        class Broken(BaseModel):
+            @classmethod
+            def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+                raise ValueError("cannot build")
+
+        recorder = Recorder(SimpleNamespace(text="{}", usage_metadata=None))
+
+        with pytest.raises(ConfigurationError) as raised:
+            await GeminiAdapter(self._client(recorder)).generate(
+                _request(response_format=ResponseFormat.JSON_SCHEMA, response_schema=Broken),
+                model="gemini-x",
+            )
+
+        assert recorder.kwargs == {}
+        # A configuration error is what the gateway records as non-billable.
+        assert isinstance(raised.value.__cause__, ValueError)
+
     async def test_the_system_prompt_travels_in_the_config(self) -> None:
         recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
 
@@ -361,6 +507,19 @@ class TestGeminiAdapter:
         )
 
         assert recorder.kwargs["config"]["response_mime_type"] == "application/json"
+
+    @pytest.mark.parametrize(
+        "alias", ["gemini-pro-latest", "gemini-flash-latest", "gemini-flash-lite-latest"]
+    )
+    async def test_a_floating_alias_receives_the_thinking_level(self, alias: str) -> None:
+        """The aliases point at generation 3 and are catalogued with its efforts."""
+        recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
+
+        await GeminiAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="low"), model=alias
+        )
+
+        assert recorder.kwargs["config"]["thinking_config"] == {"thinking_level": "low"}
 
     async def test_it_maps_gemini_3_reasoning_effort_to_a_thinking_level(self) -> None:
         recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any
 
 from llm_gateway.audio import (
@@ -25,7 +26,7 @@ from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.errors import ConfigurationError, LLMGatewayError, ProviderError
 from llm_gateway.media import GeneratedImage, ImageRequest, ProviderImageResponse
-from llm_gateway.providers.base import ProviderResponse
+from llm_gateway.providers.base import ProviderResponse, reported_usage
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.schema_prompt import system_prompt_for
 from llm_gateway.providers.strict_schema import strict_json_schema
@@ -78,7 +79,7 @@ class OpenAIAdapter:
         try:
             raw = await self._client.responses.create(**kwargs)
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         return ProviderResponse(
             output_text=getattr(raw, "output_text", None),
@@ -128,7 +129,7 @@ class OpenAIAdapter:
         except LLMGatewayError:
             raise
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         return _image_response(raw, model=model)
 
@@ -161,7 +162,7 @@ class OpenAIAdapter:
         try:
             raw = await self._client.audio.transcriptions.create(**kwargs)
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
         return normalize_provider_transcription(raw, request=request, model=model)
 
     def _build_kwargs(self, request: LLMRequest, *, model: str) -> dict[str, Any]:
@@ -183,7 +184,7 @@ class OpenAIAdapter:
             assert schema is not None  # guaranteed by LLMRequest validation
             text["format"] = {
                 "type": "json_schema",
-                "name": schema.__name__,
+                "name": _schema_name(schema.__name__),
                 # Pydantic's schema is not the subset strict mode accepts;
                 # sending it unchanged is a 400 on every structured call.
                 "schema": strict_json_schema(schema),
@@ -255,20 +256,34 @@ class OpenAIAdapter:
         return messages
 
 
+_SCHEMA_NAME_DISALLOWED = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _schema_name(name: str) -> str:
+    """The class name, within what the API accepts: ``[A-Za-z0-9_-]{1,64}``.
+
+    A generic Pydantic model is named ``Page[Item]``, and the brackets alone
+    are a 400 on every structured call that uses it. The name only labels the
+    format, so replacing what is not allowed loses nothing the model reads.
+    """
+    return _SCHEMA_NAME_DISALLOWED.sub("_", name)[:64] or "response"
+
+
 def _function_tool(tool: FunctionTool) -> dict[str, Any]:
     """The flat shape the Responses API takes, unlike Chat Completions' nested one.
 
-    ``additionalProperties`` is filled in when the caller left it out: the API
-    rejects a function schema without it, which is a 400 for the whole call and
-    not just for the tool.
+    ``strict`` is stated as ``False`` because the Responses API assumes
+    ``True`` when it is absent, and strict mode rejects an ordinary schema —
+    an optional parameter, an object left open — with a 400 for the whole
+    call. ``FunctionTool`` promises its parameters travel as written, which
+    rewriting them into the strict subset would break.
     """
-    parameters = dict(tool.parameters)
-    parameters.setdefault("additionalProperties", False)
     return {
         "type": "function",
         "name": tool.name,
         "description": tool.description or "",
-        "parameters": parameters,
+        "parameters": dict(tool.parameters),
+        "strict": False,
     }
 
 
@@ -285,7 +300,7 @@ def _tool_calls(raw: Any) -> tuple[ProviderToolCall, ...]:
     for item in items:
         if getattr(item, "type", None) != "function_call":
             continue
-        arguments = getattr(item, "arguments", "")
+        arguments = getattr(item, "arguments", None)
         call_id = getattr(item, "call_id", None)
         calls.append(
             ProviderToolCall(
@@ -293,11 +308,11 @@ def _tool_calls(raw: Any) -> tuple[ProviderToolCall, ...]:
                 # output item's own and is not interchangeable with it. Keep a
                 # missing id empty so the gateway can reject and account for it.
                 id=str(call_id) if call_id else "",
-                name=getattr(item, "name", ""),
+                name=getattr(item, "name", None) or "",
                 arguments=(
                     json.dumps(arguments, ensure_ascii=False)
                     if isinstance(arguments, dict | list)
-                    else str(arguments)
+                    else str(arguments or "")
                 ),
             )
         )
@@ -308,7 +323,7 @@ def _usage(raw: Any) -> TokenUsage:
     if raw is None:
         return TokenUsage.unknown()
     details = getattr(raw, "output_tokens_details", None)
-    return TokenUsage(
+    return reported_usage(
         input_tokens=getattr(raw, "input_tokens", None),
         # The Responses API counts reasoning inside output_tokens: input plus
         # output reconciles to total_tokens. It is reported here only as a
@@ -362,7 +377,7 @@ def _image_usage(raw: Any) -> TokenUsage:
     """The Images API reports no reasoning, so only the two totals are read."""
     if raw is None:
         return TokenUsage.unknown()
-    return TokenUsage(
+    return reported_usage(
         input_tokens=getattr(raw, "input_tokens", None),
         output_tokens=getattr(raw, "output_tokens", None),
         cached_input_tokens=getattr(

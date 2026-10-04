@@ -9,7 +9,7 @@ whole call into a 400 — at the worst moment, when a fallback is already runnin
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel, Field
@@ -119,3 +119,42 @@ def test_a_free_form_object_is_refused_before_the_call_is_billed() -> None:
 
     with pytest.raises(ConfigurationError, match="metadata"):
         strict_json_schema(Loose)
+
+
+class Cat(BaseModel):
+    kind: Literal["cat"]
+    lives: int
+
+
+class Dog(BaseModel):
+    kind: Literal["dog"]
+    good: bool
+
+
+class Shelter(BaseModel):
+    pet: Cat | Dog = Field(discriminator="kind")
+
+
+def test_a_discriminated_union_is_sent_as_the_any_of_strict_mode_accepts() -> None:
+    """Pydantic writes a tagged union as `oneOf` plus `discriminator`; strict
+    mode knows neither, so the call would be a 400 on every attempt. The tags
+    make the branches mutually exclusive, so `anyOf` admits the same answers."""
+    pet = strict_json_schema(Shelter)["properties"]["pet"]
+
+    assert "oneOf" not in pet
+    assert "discriminator" not in pet
+    assert {branch["$ref"] for branch in pet["anyOf"]} == {"#/$defs/Cat", "#/$defs/Dog"}
+
+
+class TreeNode(BaseModel):
+    label: str
+    parent: TreeNode = Field(description="The node above this one")
+
+
+def test_a_recursive_reference_with_sibling_metadata_terminates() -> None:
+    """Expanding a `$ref` that points back at its own definition never ends,
+    so the cycle is closed with the bare reference strict mode supports."""
+    schema = strict_json_schema(TreeNode)
+
+    parent = _defs(schema)["TreeNode"]["properties"]["parent"]
+    assert parent == {"$ref": "#/$defs/TreeNode"}

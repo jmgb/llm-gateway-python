@@ -5,6 +5,8 @@ package can map a provider failure it has never imported, and so installing an
 extra is never required just to interpret an error.
 """
 
+import pytest
+
 from llm_gateway import (
     AuthenticationError,
     InvalidRequestError,
@@ -125,3 +127,23 @@ def test_a_numeric_code_is_a_status_not_a_reason() -> None:
     original = FakeSDKError(code=429)
 
     assert str(classify_provider_error(original)) == "provider returned HTTP 429"
+
+
+@pytest.mark.parametrize("name", ["APIConnectionError", "ConnectError", "RemoteProtocolError"])
+def test_a_connection_failure_is_a_transient_outage(name: str) -> None:
+    """The request never got an answer — a dropped socket, a refused connect,
+    a server that hung up mid-reply — so another attempt may well succeed."""
+    error_type = type(name, (Exception,), {})
+
+    error = classify_provider_error(error_type())
+
+    assert isinstance(error, ServiceUnavailableError)
+    assert error.transient is True
+
+
+def test_a_connect_timeout_is_still_a_timeout_not_an_outage() -> None:
+    """httpx's ConnectTimeout and OpenAI's APITimeoutError (a subclass of its
+    APIConnectionError) name both; the more specific timeout wins."""
+    connect_timeout = type("ConnectTimeout", (Exception,), {})
+
+    assert isinstance(classify_provider_error(connect_timeout()), ProviderTimeoutError)

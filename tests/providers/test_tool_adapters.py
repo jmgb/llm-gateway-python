@@ -115,10 +115,32 @@ class TestOpenAISendsTools:
                     "type": "object",
                     "properties": {"city": {"type": "string"}},
                     "required": ["city"],
-                    "additionalProperties": False,
                 },
+                "strict": False,
             }
         ]
+
+    async def test_an_optional_parameter_is_sent_exactly_as_declared(self) -> None:
+        """The Responses API treats a function as strict unless told otherwise,
+        and strict mode rejects any property missing from ``required`` — a 400
+        for the whole call over a perfectly ordinary optional argument."""
+        forecast = FunctionTool(
+            name="get_forecast",
+            parameters={
+                "type": "object",
+                "properties": {"city": {"type": "string"}, "days": {"type": "integer"}},
+                "required": ["city"],
+            },
+        )
+        recorder = Recorder(_responses_reply())
+
+        await OpenAIAdapter(self._client(recorder)).generate(
+            _request(tools=(forecast,)), model="gpt-x"
+        )
+
+        (sent,) = recorder.kwargs["tools"]
+        assert sent["strict"] is False
+        assert sent["parameters"] == forecast.parameters
 
     async def test_it_defaults_to_letting_the_model_decide(self) -> None:
         recorder = Recorder(_responses_reply())
@@ -206,6 +228,15 @@ class TestOpenAIReadsCalls:
 
         assert response.tool_calls == ()
         assert response.output_text == "Sunny"
+
+    async def test_missing_arguments_are_empty_not_the_word_none(self) -> None:
+        """``"None"`` reads as a model that wrote a Python literal; an empty
+        string reads as what happened — no arguments came back."""
+        recorder = Recorder(_responses_reply(_function_call_item("call_1", "get_weather", None)))
+
+        response = await OpenAIAdapter(self._client(recorder)).generate(_request(), model="gpt-x")
+
+        assert response.tool_calls[0].arguments == ""
 
     async def test_it_does_not_invent_a_missing_call_id(self) -> None:
         recorder = Recorder(_responses_reply(_function_call_item("", "get_weather", "{}")))
@@ -346,6 +377,16 @@ class TestGroqReadsCalls:
 
         assert response.tool_calls == ()
         assert response.output_text == "Sunny"
+
+    async def test_a_call_without_a_name_is_kept_for_the_gateway_to_reject(self) -> None:
+        """Dropping it would turn a malformed reply into an answer with no
+        calls, read as prose; kept, the gateway refuses it as it does for
+        OpenAI and the attempt is accounted as the failure it was."""
+        recorder = Recorder(_chat_reply(_chat_tool_call("call_1", "", "{}")))
+
+        response = await GroqAdapter(self._client(recorder)).generate(_request(), model="llama")
+
+        assert [call.name for call in response.tool_calls] == [""]
 
     async def test_it_does_not_invent_a_missing_call_id(self) -> None:
         recorder = Recorder(_chat_reply(_chat_tool_call("", "get_weather", "{}")))

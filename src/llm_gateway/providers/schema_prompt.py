@@ -85,7 +85,9 @@ def _instruction_for(request: LLMRequest, *, structured_outputs: bool) -> str | 
             return None
         schema = request.response_schema
         assert schema is not None  # guaranteed by LLMRequest validation
-        declaration = json.dumps(schema.model_json_schema(), ensure_ascii=False, sort_keys=True)
+        # Not sorted: the model tends to write fields in the order it reads
+        # them, and that order is the caller's declaration, not the alphabet.
+        declaration = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         return f"{_SCHEMA_INSTRUCTION}\n{declaration}"
     if request.response_format is ResponseFormat.JSON_OBJECT:
         return _JSON_MODE_INSTRUCTION

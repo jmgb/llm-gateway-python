@@ -2,12 +2,14 @@
 
 ``strict: true`` is what turns a schema from a suggestion into a guarantee, and
 it is also what makes the Responses API refuse anything outside a narrow
-subset. Two of Pydantic's perfectly ordinary outputs are outside it:
+subset. Several of Pydantic's perfectly ordinary outputs are outside it:
 
 * a field with a default is left out of ``required`` — strict mode has no
   notion of optional and rejects the schema;
 * no object declares ``additionalProperties``, which strict mode requires to
   be ``false``;
+* a discriminated union is written as ``oneOf`` plus ``discriminator``, and
+  strict mode accepts only ``anyOf``;
 * nullable defaults and a ``$ref`` with sibling metadata need normalising
   before they fit the provider's accepted subset.
 
@@ -38,47 +40,82 @@ _NAMED_SCHEMA_MAP_KEYS = ("$defs", "definitions", "properties", "patternProperti
 def strict_json_schema(schema: type[BaseModel]) -> dict[str, Any]:
     """The model's schema, normalised for the Responses API's strict mode."""
     raw = schema.model_json_schema()
-    return cast("dict[str, Any]", _strict(raw, path=schema.__name__, root=raw))
+    return cast(
+        "dict[str, Any]", _strict(raw, path=schema.__name__, root=raw, expanding=frozenset())
+    )
 
 
-def _strict(node: Any, *, path: str, root: dict[str, Any]) -> Any:
-    """Rewrite one subschema, returning a copy: the caller's dict is not ours."""
+def _strict(node: Any, *, path: str, root: dict[str, Any], expanding: frozenset[str]) -> Any:
+    """Rewrite one subschema, returning a copy: the caller's dict is not ours.
+
+    ``expanding`` holds the references whose definitions enclose this node,
+    which is what lets a recursive model be expanded without expanding forever.
+    """
     if isinstance(node, list):
         return [
-            _strict(item, path=f"{path}[{index}]", root=root) for index, item in enumerate(node)
+            _strict(item, path=f"{path}[{index}]", root=root, expanding=expanding)
+            for index, item in enumerate(node)
         ]
     if not isinstance(node, dict):
         return node
 
     rewritten: dict[str, Any] = dict(node)
 
+    if "oneOf" in rewritten:
+        # Pydantic emits oneOf only for a discriminated union, whose branches
+        # the tag already makes mutually exclusive: anyOf admits exactly the
+        # same answers, and is the only union strict mode accepts. The
+        # discriminator is an annotation strict mode does not know either.
+        if "anyOf" in rewritten:
+            raise ConfigurationError(f"{path} combines oneOf and anyOf, which strict mode cannot")
+        rewritten["anyOf"] = rewritten.pop("oneOf")
+        rewritten.pop("discriminator", None)
+
     for key in _NAMED_SCHEMA_MAP_KEYS:
         nested = rewritten.get(key)
         if isinstance(nested, dict):
             rewritten[key] = {
-                name: _strict(value, path=f"{path}.{name}", root=root)
+                name: _strict(
+                    value,
+                    path=f"{path}.{name}",
+                    root=root,
+                    expanding=_entering(key, name, node=node, root=root, expanding=expanding),
+                )
                 for name, value in nested.items()
             }
-    for key in _NESTED_SCHEMA_KEYS:
+    for key in (*_NESTED_SCHEMA_KEYS, *_NESTED_SCHEMA_LIST_KEYS):
         if key in rewritten:
-            rewritten[key] = _strict(rewritten[key], path=f"{path}.{key}", root=root)
-    for key in _NESTED_SCHEMA_LIST_KEYS:
-        if key in rewritten:
-            rewritten[key] = _strict(rewritten[key], path=f"{path}.{key}", root=root)
+            rewritten[key] = _strict(
+                rewritten[key], path=f"{path}.{key}", root=root, expanding=expanding
+            )
 
     if rewritten.get("default", object()) is None:
         rewritten.pop("default")
 
     ref = rewritten.get("$ref")
     if isinstance(ref, str) and len(rewritten) > 1:
+        if ref in expanding:
+            # A model that contains itself: expanding the reference again
+            # would never end. The bare reference is what strict mode uses
+            # for recursion, at the price of this one edge's annotations.
+            return {"$ref": ref}
         resolved = _resolve_local_ref(root, ref, path=path)
         rewritten = {**resolved, **rewritten}
         rewritten.pop("$ref")
-        return _strict(rewritten, path=path, root=root)
+        return _strict(rewritten, path=path, root=root, expanding=expanding | {ref})
 
     if _is_object(rewritten):
         _close(rewritten, path=path)
     return rewritten
+
+
+def _entering(
+    key: str, name: str, *, node: dict[str, Any], root: dict[str, Any], expanding: frozenset[str]
+) -> frozenset[str]:
+    """A root definition is being expanded while its own body is rewritten."""
+    if node is root and key in ("$defs", "definitions"):
+        return expanding | {f"#/{key}/{name}"}
+    return expanding
 
 
 def _resolve_local_ref(root: dict[str, Any], ref: str, *, path: str) -> dict[str, Any]:

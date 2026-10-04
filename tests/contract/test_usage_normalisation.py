@@ -92,3 +92,66 @@ def test_an_unreported_usage_payload_is_unknown_not_zero(provider: str) -> None:
 
     assert usage.complete is False
     assert usage.output_tokens is None
+
+
+# The same call, reported inconsistently: more thinking than output, or a
+# negative count, neither of which TokenUsage will represent. The reply has
+# already been billed by the time it is read, so refusing it loses the attempt.
+INCONSISTENT_PAYLOADS: dict[str, Any] = {
+    "openai": SimpleNamespace(
+        input_tokens=INPUT_TOKENS,
+        output_tokens=OUTPUT_TOKENS,
+        output_tokens_details=SimpleNamespace(reasoning_tokens=OUTPUT_TOKENS + 1),
+    ),
+    "gemini": SimpleNamespace(
+        prompt_token_count=INPUT_TOKENS,
+        candidates_token_count=VISIBLE_TOKENS,
+        thoughts_token_count=-REASONING_TOKENS,
+    ),
+    "groq": SimpleNamespace(
+        prompt_tokens=INPUT_TOKENS,
+        completion_tokens=OUTPUT_TOKENS,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=OUTPUT_TOKENS + 1),
+    ),
+    "openrouter": SimpleNamespace(
+        prompt_tokens=INPUT_TOKENS,
+        completion_tokens=OUTPUT_TOKENS,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=OUTPUT_TOKENS + 1),
+    ),
+}
+
+
+def test_every_adapter_is_given_an_inconsistent_payload() -> None:
+    assert set(INCONSISTENT_PAYLOADS) == set(NATIVE_PAYLOADS)
+
+
+@pytest.mark.parametrize("provider", sorted(INCONSISTENT_PAYLOADS))
+def test_an_inconsistent_breakdown_is_dropped_rather_than_raised(provider: str) -> None:
+    """A ValueError here would escape the adapter as an untyped failure, and
+    the attempt it belongs to — already billed — would never be counted."""
+    usage = _usage_mappers()[provider]._usage(INCONSISTENT_PAYLOADS[provider])
+
+    assert usage.input_tokens == INPUT_TOKENS
+    assert usage.reasoning_tokens is None
+
+
+@pytest.mark.parametrize("provider", sorted(NATIVE_PAYLOADS))
+def test_a_negative_count_is_unreported_rather_than_raised(provider: str) -> None:
+    payload = SimpleNamespace(**vars(NATIVE_PAYLOADS[provider]))
+    for field in ("input_tokens", "prompt_token_count", "prompt_tokens"):
+        if hasattr(payload, field):
+            setattr(payload, field, -1)
+
+    usage = _usage_mappers()[provider]._usage(payload)
+
+    assert usage.input_tokens is None
+    assert usage.complete is False
+
+
+def test_groq_reports_cached_prompt_tokens_like_openrouter() -> None:
+    """Both speak Chat Completions; a cache hit Groq reports was being lost."""
+    payload = SimpleNamespace(
+        **vars(NATIVE_PAYLOADS["groq"]), prompt_tokens_details=SimpleNamespace(cached_tokens=4)
+    )
+
+    assert _usage_mappers()["groq"]._usage(payload).cached_input_tokens == 4

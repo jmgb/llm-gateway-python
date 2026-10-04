@@ -17,7 +17,7 @@ from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.errors import ConfigurationError, ProviderError
 from llm_gateway.media import GeneratedImage, ImageRequest, ProviderImageResponse
-from llm_gateway.providers.base import ProviderResponse
+from llm_gateway.providers.base import ProviderResponse, reported_count, reported_usage
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.validation import (
     reject_file_attachments,
@@ -56,17 +56,25 @@ class GeminiAdapter:
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
         reject_file_attachments(request, provider=self.name)
         reject_tools(request, provider=self.name)
+        # Built before the call, and refused as configuration: a schema that
+        # fails to render is a local bug, and classified as a provider error it
+        # would be retried, counted as a billable attempt and handed to the
+        # fallback, none of which can fix it.
+        contents = [
+            {"role": _role(m.role), "parts": [{"text": m.content}]} for m in request.messages
+        ]
+        try:
+            config = self._build_config(request, model=model)
+        except Exception as error:
+            raise ConfigurationError(
+                f"the request could not be built for Gemini ({type(error).__name__})"
+            ) from error
         try:
             raw = await self._client.aio.models.generate_content(
-                model=model,
-                contents=[
-                    {"role": _role(m.role), "parts": [{"text": m.content}]}
-                    for m in request.messages
-                ],
-                config=self._build_config(request, model=model),
+                model=model, contents=contents, config=config
             )
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         return ProviderResponse(
             output_text=getattr(raw, "text", None),
@@ -109,7 +117,7 @@ class GeminiAdapter:
                 config=config,
             )
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
         return _image_response(raw, model=model)
 
@@ -143,7 +151,7 @@ def _image_response(raw: Any, *, model: str) -> ProviderImageResponse:
     if candidate is None:
         raise ProviderError("Gemini returned no candidate for the image request")
 
-    reason = str(getattr(candidate, "finish_reason", "") or "")
+    reason = _reason_text(getattr(candidate, "finish_reason", None)) or ""
     content = getattr(candidate, "content", None)
     parts = getattr(content, "parts", None) or ()
     images = tuple(
@@ -167,8 +175,17 @@ def _image_response(raw: Any, *, model: str) -> ProviderImageResponse:
     )
 
 
+_GEMINI_3_ALIASES = ("gemini-pro-latest", "gemini-flash-latest", "gemini-flash-lite-latest")
+"""Floating ids the catalogue prices, and declares efforts for, as generation 3.
+
+Without them here, an alias accepted an effort in the catalogue and lost it at
+this boundary: the call went out without thinking and nothing said so.
+"""
+
+
 def _is_gemini_3(model: str) -> bool:
-    return model.startswith(("gemini-3", "models/gemini-3"))
+    bare = model.removeprefix("models/")
+    return bare.startswith("gemini-3") or bare in _GEMINI_3_ALIASES
 
 
 def _role(role: str) -> str:
@@ -182,22 +199,51 @@ def _usage(raw: Any) -> TokenUsage:
     # Gemini reports thoughts *outside* candidates_token_count, unlike the
     # providers whose output count already contains them. They are billed at
     # the output rate, so folding them in here is what keeps output_tokens
-    # meaning the same thing in every adapter. Without a candidate count there
-    # is no full output to complete, so thoughts alone stay unknown.
-    candidates = getattr(raw, "candidates_token_count", None)
-    thoughts = getattr(raw, "thoughts_token_count", None)
-    return TokenUsage(
-        input_tokens=getattr(raw, "prompt_token_count", None),
+    # meaning the same thing in every adapter.
+    prompt = reported_count(getattr(raw, "prompt_token_count", None))
+    candidates = reported_count(getattr(raw, "candidates_token_count", None))
+    thoughts = reported_count(getattr(raw, "thoughts_token_count", None))
+    if candidates is None:
+        candidates = _visible_from_total(raw, prompt=prompt, thoughts=thoughts)
+    return reported_usage(
+        input_tokens=prompt,
         output_tokens=None if candidates is None else candidates + (thoughts or 0),
         reasoning_tokens=thoughts,
         cached_input_tokens=getattr(raw, "cached_content_token_count", None),
     )
 
 
+def _visible_from_total(raw: Any, *, prompt: int | None, thoughts: int | None) -> int | None:
+    """The candidate count Gemini leaves out when it is zero.
+
+    That is exactly the reply where thinking spent ``max_output_tokens`` before
+    any text was written, so reading the gap as unknown output dropped every
+    billed thought. The total still accounts for it; anything it cannot
+    reconcile — a total smaller than its parts — stays unknown rather than
+    guessed.
+    """
+    total = reported_count(getattr(raw, "total_token_count", None))
+    if total is None or prompt is None:
+        return None
+    tool_prompt = reported_count(getattr(raw, "tool_use_prompt_token_count", None)) or 0
+    visible = total - prompt - (thoughts or 0) - tool_prompt
+    return visible if visible >= 0 else None
+
+
 def _finish_reason(raw: Any) -> str | None:
     candidates = getattr(raw, "candidates", None) or ()
     for candidate in candidates:
-        reason = getattr(candidate, "finish_reason", None)
+        reason = _reason_text(getattr(candidate, "finish_reason", None))
         if reason is not None:
-            return str(reason)
+            return reason
     return None
+
+
+def _reason_text(reason: Any) -> str | None:
+    """``STOP``, as other providers report theirs, not ``FinishReason.STOP``.
+
+    The SDK hands back an enum, and ``str()`` of one names its class.
+    """
+    if reason is None:
+        return None
+    return str(getattr(reason, "value", reason))

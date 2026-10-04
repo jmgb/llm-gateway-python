@@ -37,6 +37,44 @@ class ProviderResponse:
     """Calls the model made, still carrying the arguments exactly as sent."""
 
 
+def reported_count(count: int | None) -> int | None:
+    """A negative count is as unreported as an absent one, and must not shrink a sum."""
+    return None if count is None or count < 0 else count
+
+
+def reported_usage(
+    *,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    reasoning_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
+) -> TokenUsage:
+    """What a provider reported, kept to what ``TokenUsage`` can represent.
+
+    By the time usage is read the call has been billed, so refusing an odd
+    payload here would raise a bare ``ValueError`` past the gateway's
+    accounting and lose the attempt altogether. A negative count is read as
+    unreported, and a reasoning breakdown larger than the output it breaks
+    down is dropped: the total is what is billed, the breakdown is not.
+    """
+    input_tokens, output_tokens, reasoning_tokens, cached_input_tokens = (
+        reported_count(count)
+        for count in (input_tokens, output_tokens, reasoning_tokens, cached_input_tokens)
+    )
+    if (
+        output_tokens is not None
+        and reasoning_tokens is not None
+        and reasoning_tokens > output_tokens
+    ):
+        reasoning_tokens = None
+    return TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        reasoning_tokens=reasoning_tokens,
+        cached_input_tokens=cached_input_tokens,
+    )
+
+
 @runtime_checkable
 class ProviderAdapter(Protocol):
     """Implemented once per provider."""

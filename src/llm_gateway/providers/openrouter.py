@@ -22,10 +22,10 @@ from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.policies import RoutingPreference
 from llm_gateway.providers.base import ProviderResponse
+from llm_gateway.providers.chat_completions import base_messages, first_choice
+from llm_gateway.providers.chat_completions import token_usage as _usage
 from llm_gateway.providers.error_mapping import classify_provider_error
-from llm_gateway.providers.schema_prompt import system_prompt_for
 from llm_gateway.providers.validation import reject_file_attachments, reject_tools
-from llm_gateway.usage import TokenUsage
 
 CAPABILITIES = ProviderCapabilities(
     # Declared as the floor, not the best case: an aggregator cannot promise on
@@ -84,9 +84,9 @@ class OpenRouterAdapter:
         try:
             raw = await self._client.chat.completions.create(**kwargs)
         except Exception as error:
-            raise classify_provider_error(error) from None
+            raise classify_provider_error(error) from error
 
-        choice = _first_choice(raw)
+        choice = first_choice(raw)
         return ProviderResponse(
             output_text=getattr(getattr(choice, "message", None), "content", None),
             usage=_usage(getattr(raw, "usage", None)),
@@ -94,7 +94,7 @@ class OpenRouterAdapter:
             model_used=getattr(raw, "model", None),
         )
 
-    def _build_messages(self, request: LLMRequest) -> list[dict[str, str]]:
+    def _build_messages(self, request: LLMRequest) -> list[dict[str, Any]]:
         """Carry whatever the requested format needs the model to be told.
 
         Whether the route behind the request enforces a schema, or requires the
@@ -103,12 +103,7 @@ class OpenRouterAdapter:
         redundant sentence, and one that needs them reads its only
         specification.
         """
-        messages: list[dict[str, str]] = []
-        system_prompt = system_prompt_for(request)
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.extend({"role": m.role, "content": m.content} for m in request.messages)
-        return messages
+        return base_messages(request)
 
 
 def _provider_routing(preference: RoutingPreference) -> dict[str, Any]:
@@ -124,23 +119,3 @@ def _provider_routing(preference: RoutingPreference) -> dict[str, Any]:
     if preference.optimise_for is not None:
         routing["sort"] = preference.optimise_for
     return routing
-
-
-def _first_choice(raw: Any) -> Any:
-    choices = getattr(raw, "choices", None) or ()
-    return choices[0] if choices else None
-
-
-def _usage(raw: Any) -> TokenUsage:
-    if raw is None:
-        return TokenUsage.unknown()
-    return TokenUsage(
-        input_tokens=getattr(raw, "prompt_tokens", None),
-        output_tokens=getattr(raw, "completion_tokens", None),
-        reasoning_tokens=getattr(
-            getattr(raw, "completion_tokens_details", None), "reasoning_tokens", None
-        ),
-        cached_input_tokens=getattr(
-            getattr(raw, "prompt_tokens_details", None), "cached_tokens", None
-        ),
-    )

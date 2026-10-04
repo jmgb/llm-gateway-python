@@ -191,3 +191,31 @@ async def test_the_caller_system_prompt_survives(provider: str) -> None:
     await adapter.generate(_request(model), model=model)
 
     assert "You are a careful assistant." in json.dumps(seen["messages"], default=str)
+
+
+class Report(BaseModel):
+    summary: str
+    evidence: list[str]
+    actions: list[str]
+
+
+@pytest.mark.parametrize("provider", sorted(ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT))
+async def test_the_schema_keeps_the_declared_field_order(provider: str) -> None:
+    """The model writes fields in the order it reads them, and the order is
+    the caller's: a summary declared first is meant to be written first, not
+    after the evidence because "e" sorts before "s"."""
+    adapter_class, model = ADAPTERS_WITHOUT_SCHEMA_ENFORCEMENT[provider]
+    seen: dict[str, Any] = {}
+    adapter = adapter_class(_echoing_client(seen))
+    request = LLMRequest(
+        model=model,
+        messages=(Message("user", "a question"),),
+        response_format=ResponseFormat.JSON_SCHEMA,
+        response_schema=Report,
+    )
+
+    await adapter.generate(request, model=model)
+
+    prompt = seen["messages"][0]["content"]
+    positions = [prompt.index(f'"{name}"') for name in Report.model_fields]
+    assert positions == sorted(positions)
