@@ -301,6 +301,21 @@ class TestRouting:
         with pytest.raises(UnknownModelError):
             await gateway.generate(_request(model="unknown-model-xyz"))
 
+    @pytest.mark.parametrize("model", ["gpt-realtime-2.1", "gpt-realtime-2.1-mini"])
+    async def test_a_realtime_model_is_refused_before_anything_is_sent(self, model: str) -> None:
+        """OpenAI serves these only on its Realtime API, which no adapter speaks:
+        the Responses call would be rejected after reaching the provider."""
+        adapter = FakeAdapter(_ok("x"))
+        adapter.name = "openai"
+        registry = ProviderRegistry()
+        registry.register(adapter, model_prefixes=())
+        gateway = LLMGateway(registry=registry)
+
+        with pytest.raises(ConfigurationError, match="Realtime"):
+            await gateway.generate(_request(model=model))
+
+        assert adapter.calls == []
+
 
 class TestReasoningEffortRouting:
     @pytest.mark.parametrize("effort", ("low", "medium", "high"))
@@ -378,12 +393,12 @@ class TestReasoningEffortRouting:
 
     async def test_reasoning_effort_is_removed_for_a_model_without_reasoning_support(self) -> None:
         adapter = FakeAdapter(_ok("x"))
-        adapter.name = "openai"
+        adapter.name = "openrouter"
         registry = ProviderRegistry()
-        registry.register(adapter, model_prefixes=("gpt-",))
+        registry.register(adapter, model_prefixes=())
         gateway = LLMGateway(registry=registry)
 
-        await gateway.generate(_request(model="gpt-realtime-2.1-mini", reasoning_effort="medium"))
+        await gateway.generate(_request(model="x-ai/grok-4.5", reasoning_effort="medium"))
 
         assert adapter.requests[0].reasoning_effort is None
 

@@ -20,6 +20,11 @@ consumer pins an immutable tag and upgrades through its own pull request.
   becomes the nearest one it does, the cheaper of two equally near, instead of
   always `medium`. `none` on Gemini 3 Pro used to be billed as `medium` and is
   now `low`; `max` on Groq GPT-OSS is now `high`.
+- The `gpt-realtime` models are catalogued with `modality="realtime"`, and
+  `generate()` refuses them with `ConfigurationError` before anything is sent.
+  OpenAI serves them only on its Realtime API, which no adapter here speaks, so
+  every call used to reach the provider and be rejected there. They stay
+  catalogued, at their audio-token rates, for identity and pricing.
 - `MODEL_CATALOG` is a read-only mapping. Repricing an entry in place changed it
   for every gateway in the process; negotiated rates go through
   `builtin_price_catalog(overrides=..., version=...)`.

@@ -28,10 +28,12 @@ CATALOG_VERSION = "2026-09-30.1"
 
 Provider = str
 PricingUnit = Literal["tokens", "audio_minutes", "images", "video_seconds"]
-Modality = Literal["text", "audio", "image", "video"]
+Modality = Literal["text", "audio", "image", "video", "realtime"]
 """What a model does, which is not how it is billed: Gemini's image models are
 billed in tokens and still cannot answer a text call. Routing reads this,
-pricing reads ``pricing_unit``."""
+pricing reads ``pricing_unit``. ``realtime`` marks a model served only over a
+live session API that no adapter here speaks: catalogued for identity and
+price, refused by every call."""
 OPENAI_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "none",
     "low",
@@ -283,12 +285,36 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
-    _m("gpt-realtime-2.1", "openai", "32.00", "64.00", notes="realtime audio"),
-    _m("gpt-realtime-2.1-mini", "openai", "10.00", "20.00", notes="realtime audio"),
-    _m("gpt-realtime-2025-08-28", "openai", "32.00", "64.00", deprecated=True),
-    _m("gpt-realtime-mini-2025-10-06", "openai", "10.00", "20.00", deprecated=True),
-    _m("gpt-realtime-mini-2025-12-15", "openai", "10.00", "20.00", deprecated=True),
-    _m("gpt-realtime-1.5-2026-02-25", "openai", "32.00", "64.00", deprecated=True),
+    # Served only on OpenAI's Realtime API (`v1/realtime`), never on Responses,
+    # so `generate()` refuses them. The rates are the audio-token ones; text
+    # tokens are cheaper, and `TokenUsage` cannot tell the two apart.
+    _m("gpt-realtime-2.1", "openai", "32.00", "64.00", modality="realtime"),
+    _m("gpt-realtime-2.1-mini", "openai", "10.00", "20.00", modality="realtime"),
+    _m("gpt-realtime-2025-08-28", "openai", "32.00", "64.00", modality="realtime", deprecated=True),
+    _m(
+        "gpt-realtime-mini-2025-10-06",
+        "openai",
+        "10.00",
+        "20.00",
+        modality="realtime",
+        deprecated=True,
+    ),
+    _m(
+        "gpt-realtime-mini-2025-12-15",
+        "openai",
+        "10.00",
+        "20.00",
+        modality="realtime",
+        deprecated=True,
+    ),
+    _m(
+        "gpt-realtime-1.5-2026-02-25",
+        "openai",
+        "32.00",
+        "64.00",
+        modality="realtime",
+        deprecated=True,
+    ),
     _m(
         "gpt-transcribe",
         "openai",

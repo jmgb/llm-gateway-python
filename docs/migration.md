@@ -229,7 +229,7 @@ rename from `Upgrading to 0.15.0` are identical in both.
 
 ## Upgrading past 0.20
 
-Five behaviours change, each toward refusing or recording what used to pass
+Six behaviours change, each toward refusing or recording what used to pass
 silently:
 
 - **Reasoning effort adapts to the nearest supported level**, not to `medium`.
@@ -249,6 +249,10 @@ silently:
   a webhook handler polling the same row bill the clip once. Writing a status
   into the row yourself — from a webhook payload, say — makes the gateway take
   the job as already billed.
+- **`gpt-realtime` models are refused by `generate()`** with
+  `ConfigurationError`, before anything is sent. They only ever worked on
+  OpenAI's Realtime API, so a call naming one was already failing — after
+  reaching the provider. Remove them from text plans and fallback chains.
 - **`ResponseFormat.JSON_OBJECT` requires an object.** A reply that parses to a
   number, a boolean or a list is now an output-parsing failure, billed and
   handed to the fallback like any other unusable answer.

@@ -22,9 +22,8 @@ def test_a_remote_attachment_only_keeps_the_provider_file_id() -> None:
 
 
 class RecordingAdapter:
-    name = "openai"
-
-    def __init__(self, *responses: ProviderResponse | Exception) -> None:
+    def __init__(self, name: str, *responses: ProviderResponse | Exception) -> None:
+        self.name = name
         self._responses = list(responses)
         self.requests: list[LLMRequest] = []
 
@@ -44,9 +43,12 @@ def _response(text: str) -> ProviderResponse:
     )
 
 
-def _gateway(adapter: RecordingAdapter) -> LLMGateway:
+def _gateway(*adapters: RecordingAdapter) -> LLMGateway:
     registry = ProviderRegistry()
-    registry.register(adapter, model_prefixes=("gpt-",))
+    for adapter in adapters:
+        # Catalogued models route by provider name; `gpt-` reaches the
+        # uncatalogued id the last test sends.
+        registry.register(adapter, model_prefixes=("gpt-",) if adapter.name == "openai" else ())
     return LLMGateway(registry=registry)
 
 
@@ -64,7 +66,7 @@ def _request(model: str, *, temperature: float, fallback: str | None = None) -> 
 
 
 async def test_temperature_is_dropped_for_a_model_that_rejects_it() -> None:
-    adapter = RecordingAdapter(_response("x"))
+    adapter = RecordingAdapter("openai", _response("x"))
 
     await _gateway(adapter).generate(_request("gpt-6-luna", temperature=0.2))
 
@@ -72,32 +74,33 @@ async def test_temperature_is_dropped_for_a_model_that_rejects_it() -> None:
 
 
 async def test_temperature_survives_for_a_model_that_accepts_it() -> None:
-    adapter = RecordingAdapter(_response("x"))
+    adapter = RecordingAdapter("openrouter", _response("x"))
 
-    await _gateway(adapter).generate(_request("gpt-realtime-2.1-mini", temperature=0.2))
+    await _gateway(adapter).generate(_request("x-ai/grok-4.5", temperature=0.2))
 
     assert adapter.requests[0].temperature == 0.2
 
 
 async def test_a_fallback_does_not_inherit_a_temperature_its_model_rejects() -> None:
-    adapter = RecordingAdapter(RateLimitedError("429"), _response("from the fallback"))
+    primary = RecordingAdapter("openrouter", RateLimitedError("429"))
+    fallback = RecordingAdapter("openai", _response("from the fallback"))
 
-    result = await _gateway(adapter).generate(
+    result = await _gateway(primary, fallback).generate(
         _request(
-            "gpt-realtime-2.1-mini",
+            "x-ai/grok-4.5",
             temperature=0.2,
             fallback="gpt-5.6-terra",
         )
     )
 
     assert result.output == "from the fallback"
-    assert adapter.requests[0].temperature == 0.2
-    assert adapter.requests[1].temperature is None
+    assert primary.requests[0].temperature == 0.2
+    assert fallback.requests[0].temperature is None
 
 
 async def test_an_uncatalogued_model_keeps_the_temperature_it_was_given() -> None:
     """Silence in the catalogue is not evidence that an option is rejected."""
-    adapter = RecordingAdapter(_response("x"))
+    adapter = RecordingAdapter("openai", _response("x"))
 
     await _gateway(adapter).generate(_request("gpt-brand-new", temperature=0.2))
 

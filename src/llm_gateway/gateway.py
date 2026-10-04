@@ -232,6 +232,11 @@ class LLMGateway:
                 raise ConfigurationError(
                     f"{model!r} generates video; use LLMGateway.generate_video() instead"
                 )
+            if info is not None and info.modality == "realtime":
+                raise ConfigurationError(
+                    f"{model!r} is served only on OpenAI's Realtime API, which this "
+                    "package does not speak"
+                )
         requests_by_model = {model: _request_for_model(request, model) for model in plan}
 
         last_failure: LLMGatewayError | None = None

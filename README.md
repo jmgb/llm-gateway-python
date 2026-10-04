@@ -711,7 +711,9 @@ no derived fallback chain lands back on the dearer generation.
 
 Inline files, streaming and Gemini File Search remain absent, and so do
 provider-hosted tools — web search, code execution, file search — and any
-package-owned loop that would execute a function for you. Function tools,
+package-owned loop that would execute a function for you. So does OpenAI's
+Realtime API: the `gpt-realtime` models are catalogued for their prices, and
+`generate()` refuses them rather than send a call OpenAI would reject. Function tools,
 remote file IDs for OpenAI, audio transcription, image generation and video
 generation — both the polled shape and the submit/poll job shape — are
 supported with their own capability and cost contracts.

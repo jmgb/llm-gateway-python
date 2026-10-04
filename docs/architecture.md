@@ -111,7 +111,9 @@ the registry maps a provider to exactly one, and the catalogue's `modality`
 decides which seam a given model id may enter.
 
 Four operations, four request types, four accounting seams — and the catalogue
-decides which one a model belongs to. An audio, image or video model sent
+decides which one a model belongs to. A model that belongs to none, such as
+OpenAI's `gpt-realtime` family, which only a live Realtime session can reach,
+is catalogued as `realtime` and refused by all four. An audio, image or video model sent
 through `generate()` raises instead of degrading: a transcription priced as
 tokens and an image reply read as text are both silent failures, and both were
 cheaper to make impossible than to detect.

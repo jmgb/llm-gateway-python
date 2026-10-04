@@ -167,6 +167,14 @@ class TestIdentity:
         assert info.pricing_unit == "images"
         assert info.image_usd_per_image == Decimal("0.015")
 
+    def test_realtime_models_are_catalogued_as_realtime_not_text(self) -> None:
+        """Their prices are audio-token prices and their only endpoint is the
+        Realtime API, so nothing may route them as an ordinary text call."""
+        realtime = [m for m in models_by_provider("openai") if m.id.startswith("gpt-realtime")]
+
+        assert realtime
+        assert {m.modality for m in realtime} == {"realtime"}
+
     def test_current_openai_audio_models_use_their_current_ids(self) -> None:
         expected = {
             "gpt-realtime-2.1",
@@ -563,7 +571,7 @@ class TestDeclaredRequestOptions:
 
     def test_a_model_that_says_nothing_keeps_accepting_temperature(self) -> None:
         """Silence is not evidence of a refusal; the permissive answer is the default."""
-        info = lookup_model("gpt-realtime-2.1-mini")
+        info = lookup_model("x-ai/grok-4.5")
 
         assert info is not None
         assert info.supports_temperature is True

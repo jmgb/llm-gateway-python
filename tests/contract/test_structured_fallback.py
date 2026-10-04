@@ -108,8 +108,8 @@ CASES: dict[str, ProviderCase] = {
     "openai": ProviderCase(
         adapter=OpenAIAdapter,
         client=_openai_client,
-        primary="gpt-realtime-2.1-mini",
-        fallback="gpt-realtime-2.1",
+        primary="gpt-6-luna",
+        fallback="gpt-6.1-sol",
     ),
     "gemini": ProviderCase(
         adapter=GeminiAdapter,
