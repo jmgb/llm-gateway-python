@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-04
+
 ### Added
 
 - `NullAudioPriceCatalog` is exported, like the other three `Null*PriceCatalog`
