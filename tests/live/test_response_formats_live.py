@@ -28,11 +28,11 @@ should not see a red suite.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import pytest
+from _support import live_client
 from pydantic import BaseModel
 
 from llm_gateway import (
@@ -44,7 +44,6 @@ from llm_gateway import (
     ResponseFormat,
     RetryPolicy,
 )
-from llm_gateway.errors import ProviderNotInstalled
 from llm_gateway.factories import create_groq_client, create_openrouter_client
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openrouter import OpenRouterAdapter
@@ -92,16 +91,10 @@ async def adapter(provider: str) -> AsyncIterator[Any]:
     `ResourceWarning` for the open socket, and this suite turns warnings into
     errors — so an unclosed client would fail a test that had already passed.
     """
-    variable = "GROQ_API_KEY" if provider == "groq" else "OPENROUTER_API_KEY"
-    key = os.environ.get(variable)
-    if not key:
-        pytest.skip(f"{variable} is not set")
-
-    build = create_groq_client if provider == "groq" else create_openrouter_client
-    try:
-        client = build(api_key=key)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
+    if provider == "groq":
+        client = live_client(create_groq_client, "GROQ_API_KEY")
+    else:
+        client = live_client(create_openrouter_client, "OPENROUTER_API_KEY")
 
     adapter_class = GroqAdapter if provider == "groq" else OpenRouterAdapter
     try:

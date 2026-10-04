@@ -21,12 +21,12 @@ account with every provider.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any
 
 import pytest
+from _support import live_client
 
 from llm_gateway import (
     FunctionTool,
@@ -37,7 +37,6 @@ from llm_gateway import (
     RequiredTool,
     ToolResult,
 )
-from llm_gateway.errors import ProviderNotInstalled
 from llm_gateway.factories import create_groq_client, create_openai_client
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
@@ -69,18 +68,12 @@ def provider(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 async def gateway(provider: str) -> AsyncIterator[LLMGateway]:
-    variable = "OPENAI_API_KEY" if provider == "openai" else "GROQ_API_KEY"
-    key = os.environ.get(variable)
-    if not key:
-        pytest.skip(f"{variable} is not set")
-
-    build = create_openai_client if provider == "openai" else create_groq_client
-    try:
-        client = build(api_key=key)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
-
-    adapter = OpenAIAdapter(client) if provider == "openai" else GroqAdapter(client)
+    if provider == "openai":
+        client = live_client(create_openai_client, "OPENAI_API_KEY")
+        adapter: OpenAIAdapter | GroqAdapter = OpenAIAdapter(client)
+    else:
+        client = live_client(create_groq_client, "GROQ_API_KEY")
+        adapter = GroqAdapter(client)
     registry = ProviderRegistry()
     registry.register(adapter, model_prefixes=())
     try:

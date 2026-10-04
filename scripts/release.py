@@ -9,7 +9,7 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 if not __package__:
@@ -71,11 +71,37 @@ def _publishing_environment() -> dict[str, str]:
     return environment
 
 
-def _ensure_ready() -> None:
-    if _run(("git", "status", "--porcelain"), capture=True):
-        raise RuntimeError("working tree must be clean before a release")
-    if _run(("git", "branch", "--show-current"), capture=True) != "main":
+def _git(*arguments: str) -> str:
+    return _run(("git", *arguments), capture=True)
+
+
+def _ensure_ready(target: str, git: Callable[..., str] = _git) -> None:
+    """Refuse a release that would fail, or diverge, after it had begun.
+
+    Each of these used to surface only after the release commit existed: a
+    taken tag at `git tag`, a stale `main` at `git push` — leaving a local
+    commit and tag to undo by hand. `ls-remote` rather than `fetch` keeps the
+    whole check read-only, so the dry run can make it too.
+    """
+    if git("branch", "--show-current") != "main":
         raise RuntimeError("releases must be created from the main branch")
+    if git("status", "--porcelain"):
+        raise RuntimeError("working tree must be clean before a release")
+    tag = f"v{target}"
+    if git("tag", "--list", tag):
+        raise RuntimeError(f"tag {tag} already exists locally")
+    remote: dict[str, str] = {}
+    for line in git("ls-remote", "origin", "refs/heads/main", f"refs/tags/{tag}").splitlines():
+        sha, _, ref = line.partition("\t")
+        remote[ref] = sha
+    if f"refs/tags/{tag}" in remote:
+        raise RuntimeError(f"tag {tag} already exists on origin")
+    head = git("rev-parse", "HEAD")
+    if remote.get("refs/heads/main") != head:
+        raise RuntimeError(
+            f"HEAD {head[:12]} is not origin's main "
+            f"({remote.get('refs/heads/main', 'missing')[:12]}); pull or push until they match"
+        )
 
 
 def _checks() -> None:
@@ -124,12 +150,26 @@ def _audit_artifacts(version: str) -> None:
         print(f"  audited {path.name}: {len(members)} files, nothing local")
 
 
+def _iso_date(value: str) -> str:
+    """The changelog heading's date, refused unless it is a real YYYY-MM-DD.
+
+    `fromisoformat` alone also takes `20261004` and week dates, which would
+    land in the changelog verbatim.
+    """
+    try:
+        if date.date.fromisoformat(value).isoformat() == value:
+            return value
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError(f"expected a date as YYYY-MM-DD, got {value!r}")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     version = parser.add_mutually_exclusive_group(required=True)
     version.add_argument("--version", help="release version in X.Y.Z format")
     version.add_argument("--bump", choices=("patch", "minor", "major"))
-    parser.add_argument("--date", default=date.date.today().isoformat())
+    parser.add_argument("--date", type=_iso_date, default=date.date.today().isoformat())
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--push", action="store_true", help="push main and the tag")
     parser.add_argument(
@@ -155,11 +195,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     changelog = CHANGELOG_FILE.read_text()
     release_notes = unreleased_body(changelog)
+    _ensure_ready(target)
     if args.dry_run:
         print(f"Would release {target} from {current_version} on {args.date}.")
         return 0
 
-    _ensure_ready()
     originals = {
         PROJECT_FILE: PROJECT_FILE.read_text(),
         LOCK_FILE: LOCK_FILE.read_text(),
@@ -175,7 +215,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         _checks()
         _audit_artifacts(target)
-    except Exception:
+    except BaseException:
+        # BaseException, so a Ctrl-C during the minutes the checks take also
+        # puts the three files back rather than leaving a half-made release.
         for path, content in originals.items():
             path.write_text(content)
         raise

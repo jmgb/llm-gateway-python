@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import io
+import subprocess
 import sys
 import tarfile
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import release
 from scripts.audit_dist import artifacts_in
 from scripts.audit_dist import main as audit_dist_main
 from scripts.release_manifest import (
@@ -22,6 +25,7 @@ from scripts.release_manifest import (
     replace_lock_version,
     replace_project_version,
     unpublishable_members,
+    unreleased_body,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +99,35 @@ def test_promote_unreleased_creates_a_dated_release_section() -> None:
     assert "## [0.5.0] — 2026-07-30" in updated
 
 
+class TestTheChangelogIsReadAsWritten:
+    """An exact `\\n\\n` after the heading made CRLF read as "no [Unreleased]".
+
+    That message sends the reader looking for notes that are plainly there.
+    """
+
+    def test_crlf_line_endings_still_find_the_notes(self) -> None:
+        text = CHANGELOG.replace("\n", "\r\n")
+
+        assert unreleased_body(text).startswith("### Changed")
+
+    def test_a_missing_blank_line_under_the_heading_still_finds_the_notes(self) -> None:
+        text = CHANGELOG.replace("## [Unreleased]\n\n", "## [Unreleased]\n")
+
+        assert unreleased_body(text).startswith("### Changed")
+
+    def test_a_crlf_changelog_is_promoted_without_mixing_line_endings(self) -> None:
+        updated = promote_unreleased(CHANGELOG.replace("\n", "\r\n"), "0.6.0", "2026-07-31")
+
+        assert "## [Unreleased]\r\n\r\n## [0.6.0] — 2026-07-31\r\n\r\n### Changed" in updated
+        assert "\n" not in updated.replace("\r\n", "")
+
+    def test_an_empty_section_is_still_refused(self) -> None:
+        text = CHANGELOG.replace("### Changed\n\n- Add a release change.\n\n", "")
+
+        with pytest.raises(ValueError, match="Unreleased"):
+            unreleased_body(text)
+
+
 class TestNothingLocalIsPublishable:
     """An upload cannot be taken back, so the audit runs before it, not after.
 
@@ -149,6 +182,65 @@ class TestNothingLocalIsPublishable:
     def test_it_refuses_the_next_one_too(self, name: str) -> None:
         """Blunt on purpose: an unexpected dotfile is refused before anyone names it."""
         assert unpublishable_members([name]) == [name]
+
+    @pytest.mark.parametrize(
+        "name",
+        (
+            "pkg-1.0/credentials.json",
+            "pkg-1.0/config/prod.env",
+            "pkg-1.0/app.env.local",
+            "pkg-1.0/.env.example",
+            "pkg-1.0/keys/id_ecdsa",
+            "pkg-1.0/keys/id_ed25519_sk",
+            "pkg-1.0/putty.ppk",
+            "pkg-1.0/release.jks",
+            "pkg-1.0/android.keystore",
+            "pkg-1.0/AuthKey_ABC123.p8",
+            "pkg-1.0/client_secret_123.apps.googleusercontent.com.json",
+            "pkg-1.0/service-account-prod.json",
+            "pkg-1.0/service_account.json",
+            "pkg-1.0/tests\\.env",
+        ),
+    )
+    def test_a_credential_without_a_leading_dot_is_refused_by_its_name(self, name: str) -> None:
+        assert unpublishable_members([name]) == [name]
+
+    @pytest.mark.parametrize(
+        "name",
+        (
+            "pkg-1.0/keys/id_ed25519.pub",
+            "pkg-1.0/env.example",
+            "pkg-1.0/src/pkg/environment.py",
+            "pkg-1.0/src/pkg/credentials_test_data.py",
+            "pkg-1.0/src/pkg/service_account_docs.md",
+        ),
+    )
+    def test_a_name_that_only_resembles_a_credential_is_published(self, name: str) -> None:
+        assert unpublishable_members([name]) == []
+
+    def test_nothing_the_sdist_include_list_selects_is_refused(self) -> None:
+        """The broadened rules must not block the release they exist to protect.
+
+        Lists the tracked files the include list selects, so a new pattern that
+        matches a real file in the project fails here rather than at release
+        time. Tracked, not on disk: an ignored local `.env` is never packaged,
+        and must not fail the suite of whoever happens to keep one.
+        """
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        include = config["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+        listed = subprocess.run(
+            ["git", "ls-files", "--", *(entry[1:] for entry in include)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if listed.returncode != 0:
+            pytest.skip("not a git checkout, so there is no tracked tree to compare")
+        shipped = listed.stdout.splitlines()
+
+        assert len(shipped) > len(include)
+        assert unpublishable_members(shipped) == []
 
 
 class TestTheLocalEnvIsReadNotEvaluated:
@@ -273,3 +365,119 @@ class TestOnlyPublishingCredentialsAreExported:
 
     def test_everything_the_upload_does_not_need_is_dropped(self) -> None:
         assert set(publishing_env_values(self.ENV)) == {"UV_PUBLISH_TOKEN", "GH_TOKEN"}
+
+
+def _write_project(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[Path, str]:
+    """The three files a release rewrites, as copies the test can watch."""
+    originals = {
+        directory / "pyproject.toml": PROJECT,
+        directory / "uv.lock": LOCK,
+        directory / "CHANGELOG.md": CHANGELOG,
+    }
+    for path, content in originals.items():
+        path.write_text(content)
+    monkeypatch.setattr(release, "PROJECT_FILE", directory / "pyproject.toml")
+    monkeypatch.setattr(release, "LOCK_FILE", directory / "uv.lock")
+    monkeypatch.setattr(release, "CHANGELOG_FILE", directory / "CHANGELOG.md")
+    return originals
+
+
+class TestAnInterruptedReleaseLeavesNothingBehind:
+    def test_ctrl_c_during_the_checks_restores_all_three_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The checks take minutes, which is when a release gets interrupted.
+
+        Restoring only on `Exception` let a KeyboardInterrupt leave the version
+        bumped and the changelog promoted, ready to be committed by accident.
+        """
+        originals = _write_project(tmp_path, monkeypatch)
+        monkeypatch.setattr(release, "_ensure_ready", lambda target: None)
+
+        def interrupted() -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(release, "_checks", interrupted)
+
+        with pytest.raises(KeyboardInterrupt):
+            release.main(["--version", "0.6.0", "--date", "2026-07-31"])
+
+        assert {path: path.read_text() for path in originals} == originals
+
+
+class TestTheReleaseDateIsAnIsoDate:
+    @pytest.mark.parametrize("value", ("04/10/2026", "20261004", "2026-W40-1", "2026-02-30"))
+    def test_anything_but_yyyy_mm_dd_is_refused_before_it_reaches_the_changelog(
+        self, value: str
+    ) -> None:
+        with pytest.raises(SystemExit):
+            release._parser().parse_args(["--version", "0.6.0", "--date", value])
+
+    def test_a_real_date_is_kept_verbatim(self) -> None:
+        args = release._parser().parse_args(["--version", "0.6.0", "--date", "2026-07-31"])
+
+        assert args.date == "2026-07-31"
+
+
+class TestTheRepositoryIsCheckedBeforeAnythingIsWritten:
+    """Each refusal here used to arrive after the release commit existed.
+
+    A taken tag failed at `git tag`, a stale `main` at `git push`, and both
+    left a local commit and tag to unpick by hand.
+    """
+
+    HEAD = "a" * 40
+
+    def _git(self, **overrides: str) -> Callable[..., str]:
+        outputs = {
+            "branch": "main",
+            "status": "",
+            "tag": "",
+            "ls-remote": f"{self.HEAD}\trefs/heads/main",
+            "rev-parse": self.HEAD,
+        } | overrides
+
+        def git(*arguments: str) -> str:
+            return outputs[arguments[0]]
+
+        return git
+
+    def test_a_clean_main_in_step_with_origin_is_ready(self) -> None:
+        release._ensure_ready("0.6.0", git=self._git())
+
+    def test_a_branch_other_than_main_is_refused(self) -> None:
+        with pytest.raises(RuntimeError, match="main branch"):
+            release._ensure_ready("0.6.0", git=self._git(branch="feature"))
+
+    def test_a_dirty_tree_is_refused(self) -> None:
+        with pytest.raises(RuntimeError, match="clean"):
+            release._ensure_ready("0.6.0", git=self._git(status=" M CHANGELOG.md"))
+
+    def test_a_version_already_tagged_locally_is_refused(self) -> None:
+        with pytest.raises(RuntimeError, match=r"v0\.6\.0 already exists locally"):
+            release._ensure_ready("0.6.0", git=self._git(tag="v0.6.0"))
+
+    def test_a_version_already_tagged_on_origin_is_refused(self) -> None:
+        remote = f"{self.HEAD}\trefs/heads/main\n{'b' * 40}\trefs/tags/v0.6.0"
+
+        with pytest.raises(RuntimeError, match=r"v0\.6\.0 already exists on origin"):
+            release._ensure_ready("0.6.0", git=self._git(**{"ls-remote": remote}))
+
+    @pytest.mark.parametrize("remote_main", ("b" * 40, ""), ids=("moved", "missing"))
+    def test_a_head_that_is_not_origins_main_is_refused(self, remote_main: str) -> None:
+        """Ahead, behind or diverged: the release commit would not fast-forward cleanly."""
+        remote = f"{remote_main}\trefs/heads/main" if remote_main else ""
+
+        with pytest.raises(RuntimeError, match="not origin's main"):
+            release._ensure_ready("0.6.0", git=self._git(**{"ls-remote": remote}))
+
+    def test_the_dry_run_makes_the_same_checks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A dry run that passes where the real run would refuse is a false all-clear."""
+        _write_project(tmp_path, monkeypatch)
+        checked: list[str] = []
+        monkeypatch.setattr(release, "_ensure_ready", checked.append)
+
+        assert release.main(["--version", "0.6.0", "--dry-run"]) == 0
+        assert checked == ["0.6.0"]

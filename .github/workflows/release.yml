@@ -4,9 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch or tag to publish"
+        # No default: publishing whatever `main` happens to hold is how an
+        # unreleased commit reaches PyPI under the previous version's number.
+        description: "Release tag to publish (vX.Y.Z)"
         required: true
-        default: main
         type: string
 
 permissions:
@@ -19,15 +20,32 @@ jobs:
       name: pypi
       url: https://pypi.org/p/neutral-llm-gateway
     permissions:
+      # A job-level block replaces the workflow's, so `contents` is restated.
+      contents: read
       # Trusted publishing (OIDC): no API token stored anywhere.
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ inputs.ref }}
 
+      # The tag is the release: scripts/release.py creates it on the commit
+      # that bumped the version. A branch, or a tag whose pyproject says
+      # otherwise, would upload files whose name and contents disagree.
+      - name: Refuse anything but the tag of the version being built
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          [[ "$REF" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "::error::ref must be a release tag vX.Y.Z, got '$REF'"; exit 1; }
+          [[ "$(git rev-parse --verify --quiet "refs/tags/$REF^{commit}")" == "$(git rev-parse HEAD)" ]] \
+            || { echo "::error::$REF is not a tag on the checked-out commit"; exit 1; }
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          [[ "v$version" == "$REF" ]] \
+            || { echo "::error::$REF does not match pyproject version $version"; exit 1; }
+
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       - name: Build sdist and wheel
         run: uv build
@@ -41,4 +59,4 @@ jobs:
         run: python3 scripts/audit_dist.py
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

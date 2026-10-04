@@ -26,6 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries",
     "Typing :: Typed",
 ]
@@ -101,14 +102,20 @@ filterwarnings = ["error"]
 # Live tests call real providers and spend real money, so they are opt-in:
 # deselected by default, and run with `-m live` plus the provider keys. They
 # exist because the fakes cannot see a 400 that only the provider can send.
-addopts = "-m 'not live'"
+# Image and video generation cost orders of magnitude more, so they answer to
+# their own marker: `-m live` with every key exported must not render a video.
+addopts = "-m 'not live and not live_media'"
 markers = [
     "live: calls a real provider API. Costs money; needs credentials; skipped by default.",
+    "live_media: generates real images and video. Costs the most; run one file at a time.",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# ci-local.sh's per-interpreter environments. Git ignores them, but an unpacked
+# sdist is not a repository, so ruff would otherwise lint installed packages.
+extend-exclude = [".venv-ci-*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

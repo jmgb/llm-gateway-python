@@ -11,10 +11,20 @@ VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 # Names that carry a credential often enough that publishing one is never a
 # deliberate act. `.env` is first for a reason: 0.6.0's sdist contained one.
-SECRET_FILE_NAMES = frozenset(
-    {".env", ".envrc", ".pypirc", ".netrc", ".npmrc", "id_rsa", "id_ed25519", "credentials"}
+SECRET_FILE_NAMES = frozenset({".env", ".envrc", ".pypirc", ".netrc", ".npmrc"})
+# Matched against the whole lowercased name, so a pattern describes a file
+# rather than a substring a source module could happen to contain.
+SECRET_FILE_PATTERNS = (
+    # Any stem: `credentials`, `credentials.json`, `credentials.yaml`.
+    re.compile(r"credentials(\..*)?"),
+    # SSH private keys carry no extension; their `.pub` halves are public.
+    re.compile(r"id_[a-z0-9_]+"),
+    # `env` as any extension: `prod.env`, `app.env.local`. Blunt on purpose —
+    # a template meant to ship is named `env.example`, which this leaves alone.
+    re.compile(r".*\.env(\..*)?"),
+    re.compile(r"(client_secret|service[-_]account).*\.json"),
+    re.compile(r".*\.(pem|key|p8|p12|pfx|ppk|jks|keystore)"),
 )
-SECRET_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 # The only dotfiles the distribution is meant to carry. `.gitignore` is not on
 # the include list and lands in the sdist anyway: hatchling adds it so the
 # unpacked tree rebuilds identically. Naming it here is the difference between
@@ -91,9 +101,13 @@ def unpublishable_members(names: Iterable[str]) -> list[str]:
     """
     offenders = set()
     for name in names:
-        for part in PurePosixPath(name).parts:
+        # A zip written on Windows may name `tests\.env`, which a POSIX path
+        # reads as one harmless component.
+        for part in PurePosixPath(name.replace("\\", "/")).parts:
             lowered = part.lower()
-            if lowered in SECRET_FILE_NAMES or lowered.endswith(SECRET_FILE_SUFFIXES):
+            if lowered in SECRET_FILE_NAMES or any(
+                pattern.fullmatch(lowered) for pattern in SECRET_FILE_PATTERNS
+            ):
                 offenders.add(name)
                 break
             if part.startswith(".") and part not in PUBLISHABLE_DOTFILES:
@@ -167,8 +181,14 @@ def replace_lock_version(text: str, version: str) -> str:
     raise ValueError(f"uv.lock has no entry for {PROJECT_NAME!r}")
 
 
+# Tolerant of CRLF and of a missing blank line under the heading: an exact
+# "\n\n" turned an editor's line endings into "no [Unreleased] section", an
+# error that sends the reader looking for notes that are plainly there.
+_UNRELEASED = re.compile(r"(?ms)^## \[Unreleased\][ \t]*\r?$(?P<body>.*?)(?=^## \[|\Z)")
+
+
 def unreleased_body(text: str) -> str:
-    section = re.search(r"(?ms)^## \[Unreleased\]\n\n(?P<body>.*?)(?=^## \[|\Z)", text)
+    section = _UNRELEASED.search(text)
     if section is None or not section.group("body").strip():
         raise ValueError("CHANGELOG.md has no non-empty [Unreleased] section")
     return section.group("body").strip()
@@ -178,7 +198,10 @@ def promote_unreleased(text: str, version: str, release_date: str) -> str:
     """Move the unreleased notes under a dated version heading."""
     version_parts(version)
     body = unreleased_body(text)
-    section = re.search(r"(?ms)^## \[Unreleased\]\n\n(?P<body>.*?)(?=^## \[|\Z)", text)
+    section = _UNRELEASED.search(text)
     assert section is not None
-    replacement = f"## [Unreleased]\n\n## [{version}] — {release_date}\n\n{body}\n\n"
+    newline = "\r\n" if "\r\n" in text else "\n"
+    replacement = newline.join(
+        ("## [Unreleased]", "", f"## [{version}] — {release_date}", "", body, "", "")
+    )
     return text[: section.start()] + replacement + text[section.end() :]

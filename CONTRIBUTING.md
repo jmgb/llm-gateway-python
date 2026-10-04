@@ -80,13 +80,14 @@ GROQ_API_KEY=... OPENROUTER_API_KEY=... uv run pytest -m live
 ```
 
 Image and video generation have their own live suite, and it is the more
-expensive one — a five-second 480p clip costs USD 0.20, so it is run
-deliberately and one file at a time:
+expensive one — a five-second 480p clip costs USD 0.20. It answers to its own
+marker, `live_media`, so `-m live` never renders a video however many keys
+happen to be exported; run it deliberately and one file at a time:
 
 ```bash
 uv sync --extra gemini --extra wavespeed
 GEMINI_API_KEY=... WAVESPEED_API_KEY=... \
-  uv run pytest -m live tests/live/test_media_live.py -q -s
+  uv run pytest -m live_media tests/live/test_media_live.py -q -s
 ```
 
 It generates an image and then animates that exact image with a second
@@ -189,8 +190,9 @@ deployment, vLLM, your own gateway — widened with
 ## Adding or updating a model price
 
 Edit `src/llm_gateway/models.py`, bump `CATALOG_VERSION`, and note it in the
-changelog. `src/llm_gateway/catalogs.py` turns that table into the token, audio
-and image price catalogues; a new pricing unit is a change there too. Prices are declared in USD per million tokens. Never delete a model
+changelog. `src/llm_gateway/catalogs.py` turns that table into the token, audio,
+image and video price catalogues; a new pricing unit is a change there too.
+Prices are declared in USD per million tokens. Never delete a model
 that consumers may still call — mark it `deprecated=True`.
 
 The version is not optional bookkeeping: it travels with every recorded amount
@@ -218,7 +220,7 @@ bash scripts/ci-local.sh
 GitHub Actions invokes the same script. The hook rejects an uncommitted tree,
 a push of a commit other than the checked-out HEAD, failed checks, and edits
 made during validation. Deleting a ref does not run checks.
-The hook runs Python 3.11 and 3.13 in ignored `.venv-ci-*` environments,
+The hook runs Python 3.11, 3.13 and 3.14 in ignored `.venv-ci-*` environments,
 without provider extras. Each version runs lint, formatting, mypy, offline tests,
 the build and the artifact audit. To check one interpreter:
 `bash scripts/ci-local.sh 3.11`. To run only what a diff needs,

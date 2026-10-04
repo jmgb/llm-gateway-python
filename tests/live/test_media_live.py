@@ -7,7 +7,10 @@ unpublished amount for the Kling clip, which Replicate bills by GPU time.
 
     uv sync --extra gemini --extra wavespeed --extra replicate --extra openai
     GEMINI_API_KEY=... WAVESPEED_API_KEY=... REPLICATE_API_TOKEN=... \
-    OPENAI_API_KEY=... uv run pytest -m live tests/live/test_media_live.py -q -s
+    OPENAI_API_KEY=... uv run pytest -m live_media tests/live/test_media_live.py -q -s
+
+It answers to `live_media`, not `live`: the text suite's `-m live` run with
+every key exported must not also render two videos.
 
 The tests are a chain. The first generates a lioness running across the savanna
 with `gemini-3.1-flash-lite-image`, the cheapest catalogued image model, and
@@ -44,24 +47,23 @@ import asyncio
 import os
 import tempfile
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from _support import live_client
 
 from llm_gateway import (
     CostMeasurement,
     ImageInput,
     ImageRequest,
     LLMGateway,
+    ProviderAdapter,
     ProviderRegistry,
     TimeoutPolicy,
     VideoJobStatus,
     VideoRequest,
 )
-from llm_gateway.errors import ProviderNotInstalled
 from llm_gateway.factories import (
     create_gemini_client,
     create_openai_client,
@@ -73,7 +75,7 @@ from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.replicate import ReplicateAdapter
 from llm_gateway.providers.wavespeed import WaveSpeedAdapter
 
-pytestmark = pytest.mark.live
+pytestmark = pytest.mark.live_media
 
 IMAGE_MODEL = "gemini-3.1-flash-lite-image"
 VIDEO_MODEL = "wavespeed-ai/minimax-h3/image-to-video"
@@ -107,27 +109,27 @@ def _output_dir() -> Path:
     return Path(os.environ.get("LLM_GATEWAY_LIVE_MEDIA_DIR", tempfile.gettempdir()))
 
 
-def _gemini_gateway(key: str) -> LLMGateway:
+def _gateway(adapter: ProviderAdapter) -> LLMGateway:
     registry = ProviderRegistry()
-    registry.register(GeminiAdapter(create_gemini_client(api_key=key)), model_prefixes=())
+    registry.register(adapter, model_prefixes=())
     return LLMGateway(registry=registry)
 
 
-def _wavespeed_gateway(key: str) -> LLMGateway:
-    registry = ProviderRegistry()
-    registry.register(WaveSpeedAdapter(create_wavespeed_client(api_key=key)), model_prefixes=())
-    return LLMGateway(registry=registry)
+def _wavespeed_gateway() -> LLMGateway:
+    return _gateway(WaveSpeedAdapter(live_client(create_wavespeed_client, "WAVESPEED_API_KEY")))
+
+
+def _lion_frame() -> Path:
+    """The frame the image test wrote; regenerating it here would double a rerun's cost."""
+    frame = _output_dir() / _IMAGE_FILENAME
+    if not frame.is_file():
+        pytest.skip(f"run the image test first: {frame} does not exist")
+    return frame
 
 
 async def test_a_real_lion_image_is_generated_and_priced() -> None:
     """Gemini's cheapest image model returns bytes, usage and a token-based cost."""
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        pytest.skip("GEMINI_API_KEY is not set")
-    try:
-        gateway = _gemini_gateway(key)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
+    gateway = _gateway(GeminiAdapter(live_client(create_gemini_client, "GEMINI_API_KEY")))
 
     result = await gateway.generate_image(
         ImageRequest(
@@ -169,13 +171,7 @@ async def test_chroma_returns_a_hosted_image_priced_at_its_flat_rate() -> None:
     test that rerun by a human produces something they did not expect is a bad
     test, whatever the model allows.
     """
-    key = os.environ.get("WAVESPEED_API_KEY")
-    if not key:
-        pytest.skip("WAVESPEED_API_KEY is not set")
-    try:
-        gateway = _wavespeed_gateway(key)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
+    gateway = _wavespeed_gateway()
 
     result = await gateway.generate_image(
         ImageRequest(
@@ -201,18 +197,8 @@ async def test_the_real_lion_image_is_animated_into_a_hunt() -> None:
     It reuses the PNG the image test wrote, so run them in order. Falling back
     to generating the frame here would double the cost of a rerun.
     """
-    wavespeed_key = os.environ.get("WAVESPEED_API_KEY")
-    if not wavespeed_key:
-        pytest.skip("WAVESPEED_API_KEY is not set")
-
-    frame = _output_dir() / _IMAGE_FILENAME
-    if not frame.is_file():
-        pytest.skip(f"run the image test first: {frame} does not exist")
-
-    try:
-        gateway = _wavespeed_gateway(wavespeed_key)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
+    gateway = _wavespeed_gateway()
+    frame = _lion_frame()
 
     result = await gateway.generate_video(
         VideoRequest(
@@ -248,25 +234,6 @@ _KLING_MAX_WAIT_SECONDS = 900.0
 _REQUEST_ID = "live-kling-lion"
 
 
-@asynccontextmanager
-async def _replicate_gateway(key: str) -> AsyncIterator[LLMGateway]:
-    """Own the client for the duration of the test, then close it.
-
-    The package never closes a client it did not create — the application
-    builds it and keeps the key. Here the test *is* the application, and the
-    SDK's `httpx.AsyncClient` left open emits a `ResourceWarning` that
-    `filterwarnings = ["error"]` turns into an intermittent failure.
-    """
-    client = create_replicate_client(api_key=key)
-    registry = ProviderRegistry()
-    registry.register(ReplicateAdapter(client), model_prefixes=())
-    try:
-        yield LLMGateway(registry=registry)
-    finally:
-        await client._async_client.aclose()
-        client._client.close()
-
-
 async def test_the_same_lion_frame_is_animated_by_kling_as_a_submitted_job() -> None:
     """The job contract end to end, on the same frame and prompt as MiniMax H3.
 
@@ -277,21 +244,17 @@ async def test_the_same_lion_frame_is_animated_by_kling_as_a_submitted_job() -> 
     point of `submit_video()`/`poll_video()` — a real application runs this from
     a worker, or replaces it entirely with the webhook.
     """
-    key = os.environ.get("REPLICATE_API_TOKEN") or os.environ.get("REPLICATE_API_KEY_TOKEN")
-    if not key:
-        pytest.skip("REPLICATE_API_TOKEN is not set")
-
-    frame = _output_dir() / _IMAGE_FILENAME
-    if not frame.is_file():
-        pytest.skip(f"run the image test first: {frame} does not exist")
-
+    client = live_client(create_replicate_client, "REPLICATE_API_TOKEN", "REPLICATE_API_KEY_TOKEN")
     try:
-        manager = _replicate_gateway(key)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
-
-    async with manager as gateway:
-        await _run_kling_job(gateway, frame)
+        await _run_kling_job(_gateway(ReplicateAdapter(client)), _lion_frame())
+    finally:
+        # The package never closes a client it did not create — the
+        # application builds it and keeps the key. Here the test *is* the
+        # application, and the SDK's `httpx.AsyncClient` left open emits a
+        # `ResourceWarning` that `filterwarnings = ["error"]` turns into an
+        # intermittent failure.
+        await client._async_client.aclose()
+        client._client.close()
 
 
 async def _run_kling_job(gateway: LLMGateway, frame: Path) -> None:
@@ -358,18 +321,8 @@ async def test_a_real_openai_edit_reports_its_two_input_rates_apart() -> None:
     A fake accepts any shape, so the multipart form is exactly the kind of
     thing this suite exists to catch.
     """
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        pytest.skip("OPENAI_API_KEY is not set")
-    source = _output_dir() / _IMAGE_FILENAME
-    if not source.exists():
-        pytest.skip(f"{source} does not exist; run the Gemini image test first")
-    try:
-        registry = ProviderRegistry()
-        registry.register(OpenAIAdapter(create_openai_client(api_key=key)), model_prefixes=())
-        gateway = LLMGateway(registry=registry)
-    except ProviderNotInstalled as absent:
-        pytest.skip(str(absent))
+    gateway = _gateway(OpenAIAdapter(live_client(create_openai_client, "OPENAI_API_KEY")))
+    source = _lion_frame()
 
     result = await gateway.generate_image(
         ImageRequest(

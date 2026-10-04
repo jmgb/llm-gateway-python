@@ -1,35 +1,36 @@
 #!/usr/bin/env bash
-# CI local: los mismos checks que .github/workflows/ci.yml (matriz 3.11 y 3.13),
-# para cuando GitHub Actions no tiene minutos. El workflow también llama a este
-# script, así que local y remoto no pueden divergir.
+# Local CI: the same checks as .github/workflows/ci.yml (Python 3.11, 3.13, 3.14),
+# for when GitHub Actions has no minutes left. The workflow calls this script
+# too, so local and remote runs cannot drift apart.
 #
-#   bash scripts/ci-local.sh [all|3.11|3.13]
-#   bash scripts/ci-local.sh changed [base]   # solo si el diff vs base (origin/main) toca código
-#   bash scripts/ci-local.sh pre-push         # rutas por stdin (lo usa .githooks/pre-push)
+#   bash scripts/ci-local.sh [all|3.11|3.13|3.14]
+#   bash scripts/ci-local.sh changed [base]   # only if the diff against base (origin/main) needs it
+#   bash scripts/ci-local.sh pre-push         # paths on stdin (used by .githooks/pre-push)
 #
-# Ejecuta todos los pasos aunque alguno falle y termina con un resumen; el exit
-# code es 1 si falló alguno bloqueante. Un log por paso en $CI_LOCAL_LOG_DIR.
-# Cada versión usa su propio venv (.venv-ci-<versión>) para no tocar el de desarrollo.
-# `advisory` registra WARN sin cambiar el exit code (hoy ningún paso lo usa).
+# Every step runs even when an earlier one fails, and a summary closes the run;
+# the exit code is 1 if any blocking step failed. One log per step lands in
+# $CI_LOCAL_LOG_DIR. Each interpreter gets its own .venv-ci-<version>, so the
+# development environment is never touched. `advisory` records a WARN without
+# changing the exit code (no step uses it today).
 #
-# Sincronía: scripts/release.py::_checks() ejecuta una lista parecida sobre el
-# venv de desarrollo antes de publicar; si cambias un check aquí, cámbialo allí.
+# Keep in step: scripts/release.py::_checks() runs a similar list against the
+# development environment before a release; a check changed here changes there.
 #
-# No se reproduce: tests/live (API reales, necesitan claves y dinero), y
-# `uv publish`/`gh release` (credenciales, solo scripts/release.py).
+# Not reproduced: tests/live (real APIs, keys and money) and `uv publish` /
+# `gh release` (credentials, scripts/release.py only).
 set -uo pipefail
 mode="all"
 LOG_DIR="${CI_LOCAL_LOG_DIR:-${TMPDIR:-/tmp}/ci-local-llm-gateway-python}"
 summary=()
 failed=0
 
-_run_logged() { # <nombre> <cmd> -> rc; deja el log en $log
+_run_logged() { # <name> <cmd> -> rc; leaves the log path in $log
     local name="$1" cmd="$2" rc
     mkdir -p "$LOG_DIR"
     log="$LOG_DIR/$(printf '%s' "$name" | tr -c 'A-Za-z0-9_-' '_').log"
     printf '▶ %s\n' "$name"
     if [[ -n "${CI:-}" ]]; then
-        # En Actions la salida completa va al log del job.
+        # In Actions the full output belongs in the job log.
         bash -c "$cmd" 2>&1 | tee "$log"
         rc=${PIPESTATUS[0]}
     else
@@ -39,7 +40,7 @@ _run_logged() { # <nombre> <cmd> -> rc; deja el log en $log
     return "$rc"
 }
 
-# step <nombre> <comando bash>: ejecuta, guarda log y sigue aunque falle.
+# step <name> <bash command>: run it, keep its log, carry on if it fails.
 step() {
     local name="$1" start=$SECONDS rc log
     _run_logged "$name" "$2"; rc=$?
@@ -53,7 +54,7 @@ step() {
     return "$rc"
 }
 
-# advisory <nombre> <comando bash>: como step, pero un fallo es WARN y no cambia el exit code.
+# advisory <name> <bash command>: like step, but a failure is a WARN and keeps the exit code.
 advisory() {
     local name="$1" start=$SECONDS rc log
     _run_logged "$name" "$2"; rc=$?
@@ -67,25 +68,29 @@ advisory() {
 
 finish() {
     echo
-    echo "== ci-local ($mode) · logs en $LOG_DIR"
+    echo "== ci-local ($mode) · logs in $LOG_DIR"
     (( ${#summary[@]} )) && printf '%s\n' "${summary[@]}"
     return "$failed"
 }
 
-# Cargado con `source` (tests): solo las funciones.
+# Sourced (by the hook tests): define the functions and stop.
 (return 0 2>/dev/null) && return 0
 
 cd "$(dirname "$0")/.."
 run=0
-versions=(3.11 3.13)
+versions=(3.11 3.13 3.14)
 
-# Solo docs (markdown, docs/, licencia, artefactos) no lanza nada; lo demás sí.
+# Prose alone (Markdown, docs/, the licence, build output) runs nothing;
+# anything else runs everything. Two files look like prose and are not:
+# docs/pricing.md is read by a contract test, and .gitignore decides what
+# hatchling leaves out of the sdist, which the artifact audit must then see.
 select_from_paths() {
     local path
     while IFS= read -r path; do
         case "$path" in
             "") ;;
-            *.md|docs/*|LICENSE|.gitignore|dist/*) ;;
+            docs/pricing.md|.gitignore) run=1 ;;
+            *.md|docs/*|LICENSE|dist/*) ;;
             *) run=1 ;;
         esac
     done
@@ -94,17 +99,21 @@ select_from_paths() {
 mode="${1:-all}"
 case "$mode" in
     all) run=1 ;;
-    3.11|3.13) run=1; versions=("$mode") ;;
+    3.11|3.13|3.14) run=1; versions=("$mode") ;;
     pre-push) select_from_paths ;;
     changed)
         base="${2:-origin/main}"
-        merge_base=$(git merge-base "$base" HEAD) || { echo "ci-local: no encuentro $base (¿git fetch?)" >&2; exit 2; }
-        select_from_paths < <({ git diff --name-only "$merge_base"; git ls-files --others --exclude-standard; } | sort -u) ;;
-    *) echo "usage: bash scripts/ci-local.sh [all|3.11|3.13|changed [base]|pre-push]" >&2; exit 2 ;;
+        merge_base=$(git merge-base "$base" HEAD) || { echo "ci-local: cannot find $base (git fetch?)" >&2; exit 2; }
+        # Captured first: a failing git inside a process substitution would
+        # read as an empty diff, and an empty diff passes as prose-only.
+        paths=$({ git diff --name-only "$merge_base" && git ls-files --others --exclude-standard; }) \
+            || { echo "ci-local: cannot list the changes against $base" >&2; exit 2; }
+        select_from_paths <<< "$paths" ;;
+    *) echo "usage: bash scripts/ci-local.sh [all|3.11|3.13|3.14|changed [base]|pre-push]" >&2; exit 2 ;;
 esac
 
 if (( ! run )); then
-    echo "ci-local: solo docs, nada que validar"
+    echo "ci-local: prose-only change, nothing to check"
     exit 0
 fi
 
@@ -122,6 +131,10 @@ check_version() {
 }
 
 for v in "${versions[@]}"; do check_version "$v"; done
-step "uv.lock al día" 'uv lock --check --offline'
-step "githooks: tests" 'bash .githooks/test-pre-push.sh && bash .githooks/test-env-isolation.sh && bash .githooks/test-ci-selection.sh'
+step "uv.lock up to date" 'uv lock --check --offline'
+# An unpacked sdist has no .githooks (the artifact audit refuses dotdirs), and
+# there are no hooks to test in it either.
+if [[ -d .githooks ]]; then
+    step "githooks: tests" 'bash .githooks/test-pre-push.sh && bash .githooks/test-env-isolation.sh && bash .githooks/test-ci-selection.sh'
+fi
 finish
