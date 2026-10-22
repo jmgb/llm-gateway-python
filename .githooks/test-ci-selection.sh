@@ -31,18 +31,18 @@ for path in docs/pricing.md .gitignore; do
     ci pre-push <<< "$path" > /dev/null
     grep -q 'run --no-sync pytest' "$CHECK_CALLS" || { echo "FAIL: $path skips the checks"; exit 1; }
 done
-# code -> pytest on every interpreter
+# code -> pytest on the supported interpreter
 : > "$CHECK_CALLS"
 ci pre-push <<< 'src/pkg/x.py' > /dev/null
-[[ "$(grep -c 'run --no-sync pytest' "$CHECK_CALLS")" == 3 ]] || { echo 'FAIL: code does not run pytest on 3.11, 3.13 and 3.14'; exit 1; }
+[[ "$(grep -c 'run --no-sync pytest' "$CHECK_CALLS")" == 1 ]] || { echo 'FAIL: code does not run pytest on 3.13'; exit 1; }
 # an unpacked sdist has no .githooks -> the hook tests are skipped, not failed
 mv "$repo/.githooks" "$tmp/githooks"
-out=$(ci 3.11) || { echo 'FAIL: a tree without .githooks fails'; exit 1; }
+out=$(ci 3.13) || { echo 'FAIL: a tree without .githooks fails'; exit 1; }
 ! grep -q githooks <<< "$out" || { echo 'FAIL: a tree without .githooks runs the hook tests'; exit 1; }
 mv "$tmp/githooks" "$repo/.githooks"
 # one failure does not stop the rest, and exits 1
 : > "$CHECK_CALLS"
-if FAIL_MATCH='ruff check' ci 3.11 > /dev/null; then echo 'FAIL: exit 0 while ruff fails'; exit 1; fi
+if FAIL_MATCH='ruff check' ci 3.13 > /dev/null; then echo 'FAIL: exit 0 while ruff fails'; exit 1; fi
 grep -q 'mypy' "$CHECK_CALLS" && grep -q 'run --no-sync pytest' "$CHECK_CALLS" || { echo 'FAIL: one failure stopped the later steps'; exit 1; }
 # a failed advisory -> exit 0 with a WARN
 out=$(bash -c "source '$repo/scripts/ci-local.sh'; advisory probe false; finish" | tail -n 2)

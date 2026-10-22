@@ -29,11 +29,8 @@ class _Mergeable(Protocol):
     def merge(self, other: Self) -> Self: ...
 
 
-_U = TypeVar("_U", bound=_Mergeable)
-_C = TypeVar("_C", bound=_Mergeable)
 _U_co = TypeVar("_U_co", bound=_Mergeable, covariant=True)
 _C_co = TypeVar("_C_co", bound=_Mergeable, covariant=True)
-_A = TypeVar("_A")
 
 
 class RecordedAttempt(Protocol[_U_co, _C_co]):
@@ -65,8 +62,8 @@ def elapsed_ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
 
 
-def new_attempt(
-    attempt_type: Callable[..., _A],
+def new_attempt[A](
+    attempt_type: Callable[..., A],
     *,
     index: int,
     model: str,
@@ -79,7 +76,7 @@ def new_attempt(
     error_message: str | None = None,
     billable: bool = True,
     failure_phase: FailurePhase | None = None,
-) -> _A:
+) -> A:
     """One attempt of ``attempt_type``, its latency measured from ``started``."""
     return attempt_type(
         index=index,
@@ -109,12 +106,12 @@ def phase_of(failure: LLMGatewayError) -> FailurePhase:
     return FailurePhase.PROVIDER
 
 
-def aggregate(
-    attempts: Sequence[RecordedAttempt[_U, _C]],
+def aggregate[U: _Mergeable, C: _Mergeable](
+    attempts: Sequence[RecordedAttempt[U, C]],
     *,
-    unknown_usage: _U,
-    unavailable_cost: _C,
-) -> tuple[_U, _C]:
+    unknown_usage: U,
+    unavailable_cost: C,
+) -> tuple[U, C]:
     """Sum every billable attempt, so a retry is never invisible in the total."""
     billable = [attempt for attempt in attempts if attempt.billable]
     if not billable:

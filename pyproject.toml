@@ -4,7 +4,7 @@ version = "0.21.0"
 description = "Neutral LLM gateway: typed contracts, provider adapters and explicit retry, fallback, usage and cost accounting."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 authors = [{ name = "Miguel" }]
 keywords = [
     "llm",
@@ -23,10 +23,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries",
     "Typing :: Typed",
 ]
@@ -112,7 +109,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 # ci-local.sh's per-interpreter environments. Git ignores them, but an unpacked
 # sdist is not a repository, so ruff would otherwise lint installed packages.
 extend-exclude = [".venv-ci-*"]
@@ -121,7 +118,7 @@ extend-exclude = [".venv-ci-*"]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 # scripts/ is included because the release runner and the artifact audit decide
 # what reaches a package index, and an upload cannot be taken back.

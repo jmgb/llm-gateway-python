@@ -9,6 +9,12 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Python 3.13 is now the only supported interpreter
+  (`requires-python = ">=3.13"`). 3.11, 3.12 and 3.14 are no longer tested,
+  locally or in CI, and ruff and mypy target 3.13.
+
 ## [0.21.0] — 2026-10-04
 
 ### Added

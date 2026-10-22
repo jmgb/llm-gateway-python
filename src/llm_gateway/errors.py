@@ -9,7 +9,7 @@ No error message may contain credentials, prompts or response content.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from llm_gateway.audio import AudioAttempt
@@ -120,13 +120,10 @@ class _FailedAttempt(Protocol):
     def error_message(self) -> str | None: ...
 
 
-_AttemptT = TypeVar("_AttemptT", bound=_FailedAttempt)
-
-
-class _Exhausted(LLMGatewayError, Generic[_AttemptT]):
+class _Exhausted[AttemptT: _FailedAttempt](LLMGatewayError):
     """What every exhausted call carries: the attempts it paid for, in order."""
 
-    def __init__(self, message: str, *, attempts: tuple[_AttemptT, ...]) -> None:
+    def __init__(self, message: str, *, attempts: tuple[AttemptT, ...]) -> None:
         super().__init__(message)
         self.attempts = attempts
 

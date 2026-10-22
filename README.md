@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jmgb/llm-gateway-python/actions/workflows/ci.yml/badge.svg)](https://github.com/jmgb/llm-gateway-python/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/neutral-llm-gateway)](https://pypi.org/project/neutral-llm-gateway/)
-[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
 [![mypy: strict](https://img.shields.io/badge/mypy-strict-blue)](https://github.com/jmgb/llm-gateway-python/blob/main/pyproject.toml)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -764,7 +764,7 @@ uv run mypy
 uv build
 ```
 
-Python 3.11+, Pydantic v2.
+Python 3.13+, Pydantic v2.
 
 ## Status
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Local CI: the same checks as .github/workflows/ci.yml (Python 3.11, 3.13, 3.14),
+# Local CI: the same checks as .github/workflows/ci.yml (Python 3.13),
 # for when GitHub Actions has no minutes left. The workflow calls this script
 # too, so local and remote runs cannot drift apart.
 #
-#   bash scripts/ci-local.sh [all|3.11|3.13|3.14]
+#   bash scripts/ci-local.sh [all|3.13]
 #   bash scripts/ci-local.sh changed [base]   # only if the diff against base (origin/main) needs it
 #   bash scripts/ci-local.sh pre-push         # paths on stdin (used by .githooks/pre-push)
 #
@@ -78,7 +78,7 @@ finish() {
 
 cd "$(dirname "$0")/.."
 run=0
-versions=(3.11 3.13 3.14)
+versions=(3.13)
 
 # Prose alone (Markdown, docs/, the licence, build output) runs nothing;
 # anything else runs everything. Two files look like prose and are not:
@@ -99,7 +99,7 @@ select_from_paths() {
 mode="${1:-all}"
 case "$mode" in
     all) run=1 ;;
-    3.11|3.13|3.14) run=1; versions=("$mode") ;;
+    3.13) run=1; versions=("$mode") ;;
     pre-push) select_from_paths ;;
     changed)
         base="${2:-origin/main}"
@@ -109,7 +109,7 @@ case "$mode" in
         paths=$({ git diff --name-only "$merge_base" && git ls-files --others --exclude-standard; }) \
             || { echo "ci-local: cannot list the changes against $base" >&2; exit 2; }
         select_from_paths <<< "$paths" ;;
-    *) echo "usage: bash scripts/ci-local.sh [all|3.11|3.13|3.14|changed [base]|pre-push]" >&2; exit 2 ;;
+    *) echo "usage: bash scripts/ci-local.sh [all|3.13|changed [base]|pre-push]" >&2; exit 2 ;;
 esac
 
 if (( ! run )); then
