@@ -93,6 +93,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = ["error"]
