@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-11-13
+
 ### Added
 
 - Catalogue and route Gemini 4 Hydrogen and Carbon through Google and
