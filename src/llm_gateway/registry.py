@@ -41,7 +41,7 @@ class ProviderRegistry:
         """
         if is_retired_gemini_model(model):
             raise UnknownModelError(
-                f"model {model!r} is a Gemini generation other than 3, which is not served"
+                f"model {model!r} is a Gemini model generation that is not served"
             )
 
         declared = resolve_provider(model)

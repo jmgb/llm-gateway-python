@@ -256,6 +256,34 @@ class TestIdentity:
             assert info.output_usd_per_mtok == Decimal("3.75")
             assert info.deprecated is False
 
+    def test_gemini_4_hydrogen_is_catalogued_direct_and_on_openrouter(self) -> None:
+        for model_id, provider in (
+            ("gemini-4-hydrogen", "gemini"),
+            ("google/gemini-4-hydrogen", "openrouter"),
+        ):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.provider == provider
+            assert info.input_usd_per_mtok == Decimal("1.50")
+            assert info.output_usd_per_mtok == Decimal("7.50")
+            assert info.deprecated is False
+            assert info.supports_temperature is False
+            assert info.reasoning_efforts == ("low", "medium", "high", "xhigh")
+
+    def test_gemini_4_carbon_is_catalogued_direct_and_on_openrouter(self) -> None:
+        for model_id, provider in (
+            ("gemini-4-carbon", "gemini"),
+            ("google/gemini-4-carbon", "openrouter"),
+        ):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.provider == provider
+            assert info.input_usd_per_mtok == Decimal("2.00")
+            assert info.output_usd_per_mtok == Decimal("10.00")
+            assert info.deprecated is False
+            assert info.supports_temperature is False
+            assert info.reasoning_efforts == ("low", "medium", "high")
+
     def test_gemini_3_6_flash_remains_catalogued_as_deprecated(self) -> None:
         for model_id in ("gemini-3.6-flash", "google/gemini-3.6-flash"):
             info = lookup_model(model_id)
@@ -282,6 +310,16 @@ class TestIdentity:
             assert info is not None
             assert info.reasoning_efforts == ("minimal", "low", "medium", "high")
 
+        for model_id in ("gemini-4-hydrogen", "google/gemini-4-hydrogen"):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.reasoning_efforts == ("low", "medium", "high", "xhigh")
+
+        for model_id in ("gemini-4-carbon", "google/gemini-4-carbon"):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.reasoning_efforts == ("low", "medium", "high")
+
         for model_id in ("gemini-3.1-pro-preview",):
             info = lookup_model(model_id)
             assert info is not None
@@ -299,6 +337,14 @@ class TestIdentity:
 class TestProviderRouting:
     def test_a_catalogued_model_routes_by_its_declared_provider(self) -> None:
         assert resolve_provider("gemini-3.8-flash") == "gemini"
+
+    def test_gemini_4_hydrogen_routes_to_its_declared_provider(self) -> None:
+        assert resolve_provider("gemini-4-hydrogen") == "gemini"
+        assert resolve_provider("google/gemini-4-hydrogen") == "openrouter"
+
+    def test_gemini_4_carbon_routes_to_its_declared_provider(self) -> None:
+        assert resolve_provider("gemini-4-carbon") == "gemini"
+        assert resolve_provider("google/gemini-4-carbon") == "openrouter"
 
     def test_an_openai_prefixed_groq_model_is_not_mistaken_for_openai(self) -> None:
         """`openai/gpt-oss-120b` is served by Groq, despite the prefix."""
@@ -518,8 +564,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-09-30.1"
-    PRICE_FINGERPRINT = "d9ad047cae0cdd9cdfc5af8b378ea82ee74ae122e8bab4b081f12261bbbfb7ec"
+    PRICED_AT_VERSION = "2026-11-13"
+    PRICE_FINGERPRINT = "fae3719b14cee32cf3b333ebe1f952d21fbede1f39d3c60160f25abaa7646807"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -575,6 +621,17 @@ class TestDeclaredRequestOptions:
 
         assert info is not None
         assert info.supports_temperature is True
+
+    def test_gemini_4_hydrogen_declares_that_it_ignores_temperature(self) -> None:
+        for model_id in (
+            "gemini-4-hydrogen",
+            "google/gemini-4-hydrogen",
+            "gemini-4-carbon",
+            "google/gemini-4-carbon",
+        ):
+            info = lookup_model(model_id)
+            assert info is not None
+            assert info.supports_temperature is False
 
 
 class TestModelInfo:

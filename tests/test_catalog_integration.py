@@ -15,6 +15,7 @@ from llm_gateway import (
     Message,
     ProviderRegistry,
     ProviderResponse,
+    ReasoningEffort,
     TokenUsage,
 )
 from llm_gateway.factories import build_registry
@@ -49,8 +50,58 @@ class TestRoutingUsesTheCatalogue:
         )
 
         assert registry.resolve("gemini-3.8-flash").name == "gemini"
+        assert registry.resolve("gemini-4-hydrogen").name == "gemini"
+        assert registry.resolve("gemini-4-carbon").name == "gemini"
         assert registry.resolve("gpt-6-sol").name == "openai"
         assert registry.resolve("openai/gpt-oss-120b").name == "groq"
+
+
+@pytest.mark.parametrize(
+    ("model", "effort", "expected"),
+    (
+        ("google/gemini-4-hydrogen", "none", "low"),
+        ("google/gemini-4-hydrogen", "minimal", "low"),
+        ("google/gemini-4-hydrogen", "max", "xhigh"),
+        ("google/gemini-4-carbon", "none", "low"),
+        ("google/gemini-4-carbon", "minimal", "low"),
+        ("google/gemini-4-carbon", "max", "high"),
+    ),
+)
+async def test_openrouter_gemini_4_normalises_unsupported_reasoning_efforts(
+    model: str, effort: ReasoningEffort, expected: str
+) -> None:
+    """OpenRouter must receive a reasoning level the Gemini model supports."""
+    from llm_gateway.providers.openrouter import OpenRouterAdapter
+
+    calls: list[dict[str, object]] = []
+
+    async def create(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"), finish_reason="stop")],
+            usage=None,
+        )
+
+    registry = ProviderRegistry()
+    registry.register(
+        OpenRouterAdapter(
+            SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        ),
+        model_prefixes=(),
+    )
+    gateway = LLMGateway(registry=registry)
+
+    await gateway.generate(
+        LLMRequest(
+            model=model,
+            messages=(Message("user", "hello"),),
+            temperature=0.2,
+            reasoning_effort=effort,
+        )
+    )
+
+    assert calls[0]["extra_body"] == {"reasoning": {"effort": expected}}
+    assert "temperature" not in calls[0]
 
 
 class TestDefaultPricing:

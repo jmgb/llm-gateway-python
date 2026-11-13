@@ -22,6 +22,7 @@ from llm_gateway.models import MODEL_CATALOG, ModelInfo
 from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
+from llm_gateway.providers.openrouter import OpenRouterAdapter
 
 
 class Recorder:
@@ -53,6 +54,16 @@ def _groq(recorder: Recorder) -> Any:
     )
 
 
+def _openrouter(recorder: Recorder) -> Any:
+    recorder.response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="x"), finish_reason="stop")],
+        usage=None,
+    )
+    return OpenRouterAdapter(
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=recorder)))
+    )
+
+
 # Per provider: how to build the adapter around a recorder, and where on the
 # wire the effort ends up. A provider missing here cannot forward an effort.
 WIRES: dict[str, tuple[Callable[[Recorder], Any], Callable[[dict[str, Any]], Any]]] = {
@@ -62,6 +73,10 @@ WIRES: dict[str, tuple[Callable[[Recorder], Any], Callable[[dict[str, Any]], Any
         lambda sent: sent["config"].get("thinking_config", {}).get("thinking_level"),
     ),
     "groq": (_groq, lambda sent: sent.get("reasoning_effort")),
+    "openrouter": (
+        _openrouter,
+        lambda sent: sent.get("extra_body", {}).get("reasoning", {}).get("effort"),
+    ),
 }
 
 THINKING_MODELS: tuple[ModelInfo, ...] = tuple(
@@ -91,4 +106,5 @@ async def test_every_declared_effort_is_forwarded_by_the_adapter_that_serves_it(
             model=info.id,
         )
 
-        assert sent_effort(recorder.kwargs) == effort, f"{info.id} dropped {effort!r}"
+        expected = effort.upper() if info.id in {"gemini-4-carbon", "gemini-4-hydrogen"} else effort
+        assert sent_effort(recorder.kwargs) == expected, f"{info.id} dropped {effort!r}"

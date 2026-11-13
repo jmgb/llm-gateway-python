@@ -125,12 +125,15 @@ class GeminiAdapter:
         config: dict[str, Any] = {}
         if request.system_prompt:
             config["system_instruction"] = request.system_prompt
-        if request.temperature is not None:
+        if request.temperature is not None and not _is_gemini_4_reasoning_model(model):
             config["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             config["max_output_tokens"] = request.max_output_tokens
-        if request.reasoning_effort is not None and _is_gemini_3(model):
-            config["thinking_config"] = {"thinking_level": request.reasoning_effort}
+        if request.reasoning_effort is not None and _is_gemini_reasoning_model(model):
+            level: str = request.reasoning_effort
+            if _is_gemini_4_reasoning_model(model):
+                level = level.upper()
+            config["thinking_config"] = {"thinking_level": level}
 
         if request.response_format is ResponseFormat.JSON_OBJECT:
             config["response_mime_type"] = "application/json"
@@ -183,9 +186,17 @@ this boundary: the call went out without thinking and nothing said so.
 """
 
 
-def _is_gemini_3(model: str) -> bool:
+def _is_gemini_4_reasoning_model(model: str) -> bool:
+    return model.removeprefix("models/") in {"gemini-4-hydrogen", "gemini-4-carbon"}
+
+
+def _is_gemini_reasoning_model(model: str) -> bool:
     bare = model.removeprefix("models/")
-    return bare.startswith("gemini-3") or bare in _GEMINI_3_ALIASES
+    return (
+        bare.startswith("gemini-3")
+        or bare in _GEMINI_3_ALIASES
+        or _is_gemini_4_reasoning_model(model)
+    )
 
 
 def _role(role: str) -> str:

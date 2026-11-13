@@ -52,6 +52,17 @@ The current OpenAI reasoning models in the catalogue are priced as follows:
 The four `gpt-6` models share one set of request options: they accept the same
 reasoning efforts, drop `temperature`, and forward `verbosity` to OpenAI.
 
+## Gemini 4 standard rates
+
+Google's standard API rates for Gemini 4 Carbon are introductory through
+November 30, 2026: `$2` input / `$10` output per 1M tokens. They become `$4` /
+`$20` on December 1, 2026. Gemini 4 Hydrogen is `$1.50` / `$7.50` per 1M
+tokens. Output rates include thinking tokens. The catalogue currently records
+the active standard rates. On December 1, review Google's Carbon rate and
+recheck OpenRouter's catalog before updating either price and bumping
+`CATALOG_VERSION`; OpenRouter currently lists the same rates but has not
+announced a corresponding price change.
+
 The deprecated `gpt-5.6` pair is still resolvable, so a caller pinned to either
 id keeps routing and keeps being priced. Deprecation only bars them from
 `FallbackPolicy.cheaper_than`, which would otherwise derive a chain that climbs
@@ -87,7 +98,7 @@ Providers disagree here, so each adapter normalises at its boundary:
 |---|---|---|
 | OpenAI (Responses) | `output_tokens_details.reasoning_tokens`, already inside `output_tokens` | passed through |
 | OpenAI (Images) | no reasoning; `input_tokens_details` splits text from image input | split kept in `ImageUsage.input_image_tokens` |
-| OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through |
+| OpenRouter, Groq (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` | passed through; OpenRouter also forwards the declared `reasoning.effort` for Gemini 4 |
 | Gemini | `thoughts_token_count`, **outside** `candidates_token_count`, which is omitted when zero | folded into `output_tokens`; a missing candidate count is derived from `total_token_count` minus prompt, thoughts and tool-use prompt |
 | AssemblyAI | no token usage; duration belongs to the audio contract | kept out of token pricing |
 | Replicate | no token usage; images are billed per run | kept out of token pricing |

@@ -9,7 +9,17 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- Catalogue and route Gemini 4 Hydrogen and Carbon through Google and
+  OpenRouter, with provider-specific reasoning-level validation and pricing.
+
 ### Changed
+
+- Raise the optional `gemini` extra's minimum `google-genai` version to 2.34,
+  the minimum required by Google's Gemini 4 guides. Gemini 4 Carbon uses an
+  introductory rate: review Google's rate and OpenRouter's catalog on
+  December 1, 2026, then update them and `CATALOG_VERSION` as needed.
 
 - **Breaking:** Python 3.13 is now the only supported interpreter
   (`requires-python = ">=3.13"`). 3.11, 3.12 and 3.14 are no longer tested,

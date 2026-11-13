@@ -49,6 +49,8 @@ CAPABILITIES = ProviderCapabilities(
     reports_token_usage=True,
 )
 
+_GEMINI_4_REASONING_MODELS = {"google/gemini-4-hydrogen", "google/gemini-4-carbon"}
+
 
 class OpenRouterAdapter:
     """Translates the neutral contract to Chat Completions."""
@@ -66,15 +68,13 @@ class OpenRouterAdapter:
             "model": model,
             "messages": self._build_messages(request),
         }
-        if request.temperature is not None:
+        if request.temperature is not None and model not in _GEMINI_4_REASONING_MODELS:
             kwargs["temperature"] = request.temperature
         if request.max_output_tokens is not None:
             kwargs["max_tokens"] = request.max_output_tokens
-        if request.routing.stated:
-            # `provider` belongs to OpenRouter's request body, not to the
-            # OpenAI SDK signature used as transport. Provider-only fields
-            # must travel through the SDK's explicit passthrough.
-            kwargs["extra_body"] = {"provider": _provider_routing(request.routing)}
+        extra_body = self._build_extra_body(request, model=model)
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         if request.response_format in (ResponseFormat.JSON_OBJECT, ResponseFormat.JSON_SCHEMA):
             # Schema enforcement depends on the model behind the route, so the
             # most this provider can honestly ask for is JSON. The gateway
@@ -93,6 +93,18 @@ class OpenRouterAdapter:
             finish_reason=getattr(choice, "finish_reason", None),
             model_used=getattr(raw, "model", None),
         )
+
+    def _build_extra_body(self, request: LLMRequest, *, model: str) -> dict[str, Any]:
+        """Build OpenRouter-only fields shared by both SDK call paths."""
+        extra_body: dict[str, Any] = {}
+        if model in _GEMINI_4_REASONING_MODELS and request.reasoning_effort is not None:
+            extra_body["reasoning"] = {"effort": request.reasoning_effort}
+        if request.routing.stated:
+            # `provider` belongs to OpenRouter's request body, not to the
+            # OpenAI SDK signature used as transport. Provider-only fields
+            # must travel through the SDK's explicit passthrough.
+            extra_body["provider"] = _provider_routing(request.routing)
+        return extra_body
 
     def _build_messages(self, request: LLMRequest) -> list[dict[str, Any]]:
         """Carry whatever the requested format needs the model to be told.

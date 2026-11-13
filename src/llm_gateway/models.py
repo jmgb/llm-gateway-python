@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-09-30.1"
+CATALOG_VERSION = "2026-11-13"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -49,6 +49,17 @@ GEMINI_3_FLASH_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "high",
 )
 GEMINI_3_PRO_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+    "low",
+    "medium",
+    "high",
+)
+GEMINI_4_HYDROGEN_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+)
+GEMINI_4_CARBON_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
     "low",
     "medium",
     "high",
@@ -526,6 +537,27 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=GEMINI_3_FLASH_REASONING_EFFORTS,
     ),
     _m(
+        "gemini-4-hydrogen",
+        "gemini",
+        "1.50",
+        "7.50",
+        notes="Gemini 4 Hydrogen; ignores sampling parameters",
+        reasoning_efforts=GEMINI_4_HYDROGEN_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
+    _m(
+        "gemini-4-carbon",
+        "gemini",
+        "2.00",
+        "10.00",
+        notes=(
+            "Gemini 4 Carbon introductory price through 2026-11-30; "
+            "standard price changes to USD 4/20 per MTok on 2026-12-01"
+        ),
+        reasoning_efforts=GEMINI_4_CARBON_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
+    _m(
         "gemini-pro-latest",
         "gemini",
         "2.00",
@@ -568,6 +600,27 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("google/gemini-3.5-flash-lite", "openrouter", "0.30", "2.50"),
     _m("google/gemini-3.6-flash", "openrouter", "1.50", "7.50", deprecated=True),
     _m("google/gemini-3.8-flash", "openrouter", "0.75", "3.75"),
+    _m(
+        "google/gemini-4-hydrogen",
+        "openrouter",
+        "1.50",
+        "7.50",
+        notes="Gemini 4 Hydrogen; reasoning effort forwarded to the model",
+        reasoning_efforts=GEMINI_4_HYDROGEN_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
+    _m(
+        "google/gemini-4-carbon",
+        "openrouter",
+        "2.00",
+        "10.00",
+        notes=(
+            "OpenRouter currently lists USD 2/10 per MTok; Google changes to "
+            "USD 4/20 on 2026-12-01, so reverify OpenRouter's rate then"
+        ),
+        reasoning_efforts=GEMINI_4_CARBON_REASONING_EFFORTS,
+        supports_temperature=False,
+    ),
     _m("anthropic/claude-sonnet-4.6", "openrouter", "3.00", "15.00", deprecated=True),
     # Claude 5.5 rejects a non-default temperature/top_p with HTTP 400.
     _m(
@@ -797,7 +850,10 @@ def is_retired_gemini_model(model_id: str) -> bool:
     for component in model_id.lower().split("/"):
         if not component.startswith("gemini-"):
             continue
-        major = component.removeprefix("gemini-").split(".", 1)[0]
+        version_prefix = component.removeprefix("gemini-")
+        major = version_prefix[0] if version_prefix else ""
+        if major == "4" and component in {"gemini-4-hydrogen", "gemini-4-carbon"}:
+            continue
         if major.isdigit() and major != "3":
             return True
     return False

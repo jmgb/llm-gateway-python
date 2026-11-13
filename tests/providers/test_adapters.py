@@ -530,6 +530,32 @@ class TestGeminiAdapter:
 
         assert recorder.kwargs["config"]["thinking_config"] == {"thinking_level": "medium"}
 
+    async def test_it_maps_gemini_4_reasoning_effort_to_a_thinking_level(self) -> None:
+        recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
+
+        await GeminiAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="xhigh"), model="gemini-4-hydrogen"
+        )
+
+        assert recorder.kwargs["config"]["thinking_config"] == {"thinking_level": "XHIGH"}
+
+    async def test_it_maps_gemini_4_carbon_reasoning_effort_to_a_thinking_level(self) -> None:
+        recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
+
+        await GeminiAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="medium"), model="gemini-4-carbon"
+        )
+
+        assert recorder.kwargs["config"]["thinking_config"] == {"thinking_level": "MEDIUM"}
+
+    @pytest.mark.parametrize("model", ("gemini-4-hydrogen", "gemini-4-carbon"))
+    async def test_gemini_4_ignores_temperature(self, model: str) -> None:
+        recorder = Recorder(SimpleNamespace(text="x", usage_metadata=None))
+
+        await GeminiAdapter(self._client(recorder)).generate(_request(temperature=0.2), model=model)
+
+        assert "temperature" not in recorder.kwargs["config"]
+
 
 class TestGroqAdapter:
     def _client(self, recorder: Recorder) -> Any:
@@ -668,6 +694,49 @@ class TestOpenRouterAdapter:
         assert response.usage.input_tokens == 5
         assert response.usage.output_tokens == 2
         assert response.finish_reason == "stop"
+
+    async def test_hydrogen_receives_its_declared_reasoning_effort(self) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="xhigh"), model="google/gemini-4-hydrogen"
+        )
+
+        assert recorder.kwargs["extra_body"] == {"reasoning": {"effort": "xhigh"}}
+
+    async def test_other_openrouter_models_do_not_receive_hydrogen_reasoning_fields(self) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="high"), model="x-ai/grok-4.5"
+        )
+
+        assert "extra_body" not in recorder.kwargs
+
+    async def test_carbon_receives_its_declared_reasoning_effort(self) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(
+            _request(reasoning_effort="high"), model="google/gemini-4-carbon"
+        )
+
+        assert recorder.kwargs["extra_body"] == {"reasoning": {"effort": "high"}}
+
+    async def test_hydrogen_reasoning_and_provider_routing_share_extra_body(self) -> None:
+        recorder = Recorder(self._reply())
+
+        await OpenRouterAdapter(self._client(recorder)).generate(
+            _request(
+                reasoning_effort="low",
+                routing=RoutingPreference(order=("Google",)),
+            ),
+            model="google/gemini-4-hydrogen",
+        )
+
+        assert recorder.kwargs["extra_body"] == {
+            "reasoning": {"effort": "low"},
+            "provider": {"order": ["Google"]},
+        }
 
     async def test_the_system_prompt_becomes_the_first_message(self) -> None:
         recorder = Recorder(self._reply())

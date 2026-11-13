@@ -25,7 +25,7 @@ from llm_gateway.providers.wavespeed import WaveSpeedAdapter, WaveSpeedHttpClien
 from llm_gateway.registry import ProviderRegistry
 
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
-GEMINI_MODEL_PREFIXES = ("gemini-3", "models/gemini-3")
+GEMINI_MODEL_PREFIXES = ("gemini-3", "models/gemini-3", "gemini-4", "models/gemini-4")
 GROQ_MODEL_PREFIXES = (
     "llama",
     "mixtral",

@@ -216,6 +216,18 @@ class TestOpenRouter:
         assert registry.resolve("google/gemini-3.1-pro-preview").name == "openrouter"
         assert registry.resolve("gemini-3.1-pro-preview").name == "gemini"
 
+    def test_hydrogen_routes_to_google_or_openrouter_by_catalogue(self) -> None:
+        from types import SimpleNamespace
+
+        registry = build_registry(
+            gemini_client=SimpleNamespace(), openrouter_client=SimpleNamespace()
+        )
+
+        assert registry.resolve("gemini-4-hydrogen").name == "gemini"
+        assert registry.resolve("google/gemini-4-hydrogen").name == "openrouter"
+        assert registry.resolve("gemini-4-carbon").name == "gemini"
+        assert registry.resolve("google/gemini-4-carbon").name == "openrouter"
+
     def test_a_catalogued_model_never_falls_through_to_another_providers_prefix(self) -> None:
         """Groq's `qwen` prefix used to catch OpenRouter's `qwen/qwen3.8-max`:
         the wrong API, billed at the wrong rate."""
@@ -238,6 +250,19 @@ class TestOpenRouter:
             openai_client=SimpleNamespace(),
             openrouter_client=SimpleNamespace(),
             extra_openai_prefixes=("gemini",),
+        )
+
+        with pytest.raises(UnknownModelError, match="Gemini"):
+            registry.resolve(model)
+
+    @pytest.mark.parametrize("model", ["gemini-4-argon", "openrouter/google/gemini-4-argon"])
+    def test_an_uncatalogued_gemini_4_model_is_not_served(self, model: str) -> None:
+        from types import SimpleNamespace
+
+        from llm_gateway import UnknownModelError
+
+        registry = build_registry(
+            gemini_client=SimpleNamespace(), openrouter_client=SimpleNamespace()
         )
 
         with pytest.raises(UnknownModelError, match="Gemini"):
