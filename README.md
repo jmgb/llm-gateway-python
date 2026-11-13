@@ -622,7 +622,9 @@ fallback that inherited it from another model.
 Reasoning effort is checked the same way. OpenAI's reasoning models support
 `none`, `low`, `medium`, `high`, `xhigh`, and `max`; Gemini 3 Flash supports
 `minimal`, `low`, `medium`, and `high`; Gemini 3 Pro and Groq GPT-OSS support
-`low`, `medium`, and `high`. If a model cannot honour the requested effort,
+`low`, `medium`, and `high`. Gemini 4 Hydrogen supports `low`, `medium`,
+`high`, and `xhigh`; Gemini 4 Carbon supports `low`, `medium`, and `high`.
+If a model cannot honour the requested effort,
 the gateway sends the nearest one it supports, choosing the cheaper of two
 equally near — `none` becomes `low` on Gemini 3 Pro, `max` becomes `high` —
 and omits the option for a model that declares no efforts at all.
@@ -642,8 +644,8 @@ aggregator has that choice, so OpenRouter is the one adapter declaring
 from llm_gateway import LLMRequest, RoutingPreference
 
 LLMRequest(
-    model="google/gemini-3.8-flash",
-    routing=RoutingPreference(order=("Groq", "SambaNova"), optimise_for="throughput"),
+    model="google/gemini-4-hydrogen",
+    routing=RoutingPreference(optimise_for="throughput"),
 )
 ```
 

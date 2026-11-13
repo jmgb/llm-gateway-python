@@ -256,3 +256,21 @@ silently:
 - **`ResponseFormat.JSON_OBJECT` requires an object.** A reply that parses to a
   number, a boolean or a list is now an output-parsing failure, billed and
   handed to the fallback like any other unusable answer.
+
+
+## Upgrading to 0.22.0
+
+Gemini 4 Hydrogen and Carbon are available through Google and OpenRouter.
+Applications migrating from a general-purpose Flash text model should select
+`gemini-4-hydrogen` or `google/gemini-4-hydrogen` explicitly; the library does
+not change application defaults or rewrite historical model IDs. Flash Lite,
+image generation, speech and video models remain separate choices.
+
+Hydrogen accepts `low`, `medium`, `high` and `xhigh`; Carbon accepts `low`,
+`medium` and `high`. The gateway adapts unsupported efforts to the nearest
+supported level, omits temperature for these models, and sends the effort
+through Google's `thinking_level` or OpenRouter's `reasoning.effort`.
+
+The Gemini extra now requires `google-genai>=2.34,<3`. The package requires
+Python 3.13 or newer. See [pricing](pricing.md) for current rates and the
+announced end of Carbon's introductory Google rate.
