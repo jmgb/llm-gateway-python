@@ -657,6 +657,54 @@ only the halves a caller filled in are sent.
 wire format and ships none of its own. That is a fact about the transport: the
 adapter, the declared capabilities and the prices are OpenRouter's.
 
+### Image and video understanding
+
+`Message` accepts `images=(ImageInput(...),)` and `videos=(VideoInput(...),)`
+on user turns. The text remains in `content`, so existing text-only calls are
+unchanged. OpenRouter translates these sources to `image_url` and `video_url`
+parts on the same turn. Its model must support the requested input types;
+the other adapters currently reject visual message inputs before dispatch.
+
+```python
+from llm_gateway import ImageInput, LLMRequest, Message, VideoInput
+
+result = await gateway.generate(
+    LLMRequest(
+        model="qwen/qwen4-max",
+        messages=(
+            Message(
+                "user",
+                "Describe the changes between this frame and the clip.",
+                images=(ImageInput(url="https://example.com/frame.jpg"),),
+                videos=(VideoInput(data=clip_bytes, mime_type="video/mp4"),),
+            ),
+        ),
+        reasoning_effort="low",
+        max_output_tokens=2048,
+    )
+)
+```
+
+Build this gateway with an OpenRouter client as shown below. Sources may use
+`url=` (including a base64 data URL) or `data=` bytes; video bytes require an
+explicit video MIME type. The application reads local files and owns trimming,
+compression, hosting and any audio transcription. URL support and video limits
+depend on the upstream provider; inline bytes avoid requiring it to fetch a
+public URL. The gateway never downloads a source.
+
+`qwen/qwen4-max` accepts **text, images and video**, returns text, has a 1M-token
+context, and offers `none`, `low`, `high` and `xhigh` reasoning. Audio and native
+file inputs are not declared for this model. `ModelInfo.input_modalities`
+records verified input types; `None` on other entries means this metadata has
+not been catalogued, rather than that the model is text-only. Adapter support
+and model input support are separate requirements.
+
+Analysis uses `generate()` and token accounting. `generate_video()` creates
+footage and uses a different contract. The application chooses its default
+analysis model; this package supplies no feature-specific default. JSON output,
+local schema validation, retries and opt-in fallbacks use the usual `LLMRequest`
+options. OpenRouter's existing tool-calling restriction still applies.
+
 ### Routing to OpenRouter
 
 Models reach it by their namespace, so nothing needs configuring:

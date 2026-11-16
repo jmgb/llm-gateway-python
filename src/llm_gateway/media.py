@@ -1,7 +1,7 @@
 """Provider-neutral image and video generation contracts.
 
-An image is not a token message, so it does not travel through ``LLMRequest``:
-its output is bytes or a URL, and its price is per image for some providers and
+A generated image does not travel through ``LLMRequest``: its output is bytes
+or a URL, and its price is per image for some providers and
 per token for others. Modelling it as a text call would force the result type
 to lie about one of the two.
 
@@ -16,32 +16,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from llm_gateway.contracts import AttemptOutcome, FailurePhase
+from llm_gateway.inputs import ImageInput as ImageInput
 from llm_gateway.policies import FallbackPolicy, RetryPolicy, TimeoutPolicy
 from llm_gateway.pricing import ImageCost, VideoCost
 from llm_gateway.usage import ImageUsage, VideoUsage
-
-
-@dataclass(frozen=True, slots=True)
-class ImageInput:
-    """The starting image of an edit, as bytes or as a fetchable URL.
-
-    Both exist because providers accept different ones and neither converts
-    the other for free: Gemini takes inline bytes, Replicate takes a URL it
-    fetches itself. An adapter rejects the form it cannot use rather than
-    downloading or hosting on the caller's behalf.
-    """
-
-    data: bytes | None = None
-    url: str | None = None
-    mime_type: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.data is None and self.url is None:
-            raise ValueError("image data or url is required")
-        if self.data is not None and not self.data:
-            raise ValueError("image data must be non-empty")
-        if self.url is not None and not self.url.strip():
-            raise ValueError("image url must be non-empty")
 
 
 @dataclass(frozen=True, slots=True)

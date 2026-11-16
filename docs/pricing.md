@@ -68,6 +68,22 @@ id keeps routing and keeps being priced. Deprecation only bars them from
 `FallbackPolicy.cheaper_than`, which would otherwise derive a chain that climbs
 back onto the dearer generation now that `gpt-6-luna` is the floor.
 
+## Qwen4 Max video understanding
+
+`qwen/qwen4-max` is priced as tokens, including image and video input tokens,
+not as generated video seconds. OpenRouter's [models API](https://openrouter.ai/api/v1/models)
+reported `$1.425` input / `$4.275` output per 1M tokens on November 17, 2026;
+these are the rates recorded under catalogue version `2026-11-17`. The
+[model page](https://openrouter.ai/qwen/qwen4-max) also displays upstream list
+rates, which can differ from that API snapshot. OpenRouter routes can change
+provider and price; use a versioned custom catalogue for negotiated or pinned
+upstream rates. Existing cache accounting remains unchanged.
+
+Reasoning tokens are included in `completion_tokens`, so the adapter reports
+them as a breakdown without adding them to the bill again. Clip duration,
+resolution and frame sampling affect tokenisation: a token rate alone cannot
+establish a fixed cost per minute of footage.
+
 ## The three measurements
 
 `Cost.measurement` is as important as the amount:

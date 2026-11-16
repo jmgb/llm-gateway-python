@@ -9,6 +9,23 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- Catalogue `qwen/qwen4-max` through OpenRouter with text, image and video
+  inputs, and `none`, `low`, `high` and `xhigh` reasoning efforts.
+- Generic per-user-message `images` and `videos`, reusing `ImageInput` and
+  exporting `VideoInput`. OpenRouter sends URL or inline-byte sources on their
+  original turn; other text adapters refuse visual inputs before dispatch.
+- Optional `ModelInfo.input_modalities` for verified model input types,
+  separate from output modality and pricing units.
+
+### Changed
+
+- **Cost-affecting:** add Qwen4 Max at OpenRouter's November 17 API rates of
+  `$1.425` input / `$4.275` output per 1M tokens and move `CATALOG_VERSION` to
+  `2026-11-17`. Video understanding uses token accounting; reasoning remains
+  included in billed output tokens. Upstream rates may differ.
+
 ## [0.22.0] — 2026-11-13
 
 ### Added

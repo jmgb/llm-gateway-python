@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from llm_gateway.inputs import ImageInput, VideoInput
 from llm_gateway.policies import FallbackPolicy, RetryPolicy, RoutingPreference, TimeoutPolicy
 from llm_gateway.pricing import Cost
 from llm_gateway.tools import FunctionTool, RequiredTool, ToolCall, ToolChoice, ToolResult
@@ -30,6 +31,12 @@ class Message:
 
     role: Role
     content: str
+    images: tuple[ImageInput, ...] = ()
+    videos: tuple[VideoInput, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (self.images or self.videos) and self.role != "user":
+            raise ValueError("visual inputs require a user message")
 
 
 @dataclass(frozen=True, slots=True)

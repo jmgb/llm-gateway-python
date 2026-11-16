@@ -20,7 +20,7 @@ from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.chat_completions import base_messages, first_choice
 from llm_gateway.providers.chat_completions import token_usage as _usage
 from llm_gateway.providers.error_mapping import classify_provider_error
-from llm_gateway.providers.validation import reject_file_attachments
+from llm_gateway.providers.validation import reject_file_attachments, reject_visual_inputs
 from llm_gateway.tools import FunctionTool, ProviderToolCall, RequiredTool, ToolChoice
 
 CAPABILITIES = ProviderCapabilities(
@@ -46,6 +46,7 @@ class GroqAdapter:
         self._client = client
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
+        reject_visual_inputs(request, provider=self.name)
         reject_file_attachments(request, provider=self.name)
         kwargs: dict[str, Any] = {
             "model": model,

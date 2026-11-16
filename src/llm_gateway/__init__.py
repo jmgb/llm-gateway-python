@@ -55,6 +55,7 @@ from llm_gateway.errors import (
     UnknownModelError,
 )
 from llm_gateway.gateway import LLMGateway
+from llm_gateway.inputs import VideoInput
 from llm_gateway.media import (
     GeneratedImage,
     GeneratedVideo,
@@ -248,6 +249,7 @@ __all__ = [
     "VideoAttempt",
     "VideoCost",
     "VideoExecution",
+    "VideoInput",
     "VideoJob",
     "VideoJobProviderAdapter",
     "VideoJobResult",

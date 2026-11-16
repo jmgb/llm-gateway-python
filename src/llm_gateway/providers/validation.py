@@ -35,3 +35,9 @@ def reject_unsendable_image_options(request: ImageRequest, *, provider: str) -> 
         raise ConfigurationError(f"{provider} does not size images as WIDTHxHEIGHT")
     if request.quality is not None:
         raise ConfigurationError(f"{provider} publishes no image quality tiers")
+
+
+def reject_visual_inputs(request: LLMRequest, *, provider: str) -> None:
+    """Refuse unsupported sources before a paid call can lose them."""
+    if any(message.images or message.videos for message in request.messages):
+        raise ConfigurationError(f"{provider} does not support visual inputs")

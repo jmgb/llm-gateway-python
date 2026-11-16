@@ -16,10 +16,13 @@ its own rather than the OpenAI adapter wearing a different ``base_url``:
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
+from llm_gateway.inputs import ImageInput, VideoInput
+from llm_gateway.models import lookup_model
 from llm_gateway.policies import RoutingPreference
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.chat_completions import base_messages, first_choice
@@ -97,7 +100,11 @@ class OpenRouterAdapter:
     def _build_extra_body(self, request: LLMRequest, *, model: str) -> dict[str, Any]:
         """Build OpenRouter-only fields shared by both SDK call paths."""
         extra_body: dict[str, Any] = {}
-        if model in _GEMINI_4_REASONING_MODELS and request.reasoning_effort is not None:
+        if (
+            (info := lookup_model(model)) is not None
+            and info.reasoning_efforts
+            and request.reasoning_effort is not None
+        ):
             extra_body["reasoning"] = {"effort": request.reasoning_effort}
         if request.routing.stated:
             # `provider` belongs to OpenRouter's request body, not to the
@@ -115,7 +122,22 @@ class OpenRouterAdapter:
         redundant sentence, and one that needs them reads its only
         specification.
         """
-        return base_messages(request)
+        messages = base_messages(request)
+        offset = len(messages) - len(request.messages)
+        for index, message in enumerate(request.messages):
+            if not message.images and not message.videos:
+                continue
+            parts: list[dict[str, Any]] = [{"type": "text", "text": message.content}]
+            parts.extend(
+                {"type": "image_url", "image_url": {"url": _source_url(image)}}
+                for image in message.images
+            )
+            parts.extend(
+                {"type": "video_url", "video_url": {"url": _source_url(video)}}
+                for video in message.videos
+            )
+            messages[offset + index]["content"] = parts
+        return messages
 
 
 def _provider_routing(preference: RoutingPreference) -> dict[str, Any]:
@@ -131,3 +153,13 @@ def _provider_routing(preference: RoutingPreference) -> dict[str, Any]:
     if preference.optimise_for is not None:
         routing["sort"] = preference.optimise_for
     return routing
+
+
+def _source_url(source: ImageInput | VideoInput) -> str:
+    """Inline bytes without fetching a URL or exposing content to telemetry."""
+    if source.url is not None:
+        return source.url
+    assert source.data is not None
+    mime_type = source.mime_type or "image/png"
+    encoded = base64.b64encode(source.data).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"

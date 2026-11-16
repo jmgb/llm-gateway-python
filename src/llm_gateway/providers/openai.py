@@ -30,6 +30,7 @@ from llm_gateway.providers.base import ProviderResponse, reported_usage
 from llm_gateway.providers.error_mapping import classify_provider_error
 from llm_gateway.providers.schema_prompt import system_prompt_for
 from llm_gateway.providers.strict_schema import strict_json_schema
+from llm_gateway.providers.validation import reject_visual_inputs
 from llm_gateway.tools import FunctionTool, ProviderToolCall, RequiredTool, ToolChoice
 from llm_gateway.usage import ImageUsage, TokenUsage
 
@@ -75,6 +76,7 @@ class OpenAIAdapter:
         self._client = client
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
+        reject_visual_inputs(request, provider=self.name)
         kwargs = self._build_kwargs(request, model=model)
         try:
             raw = await self._client.responses.create(**kwargs)

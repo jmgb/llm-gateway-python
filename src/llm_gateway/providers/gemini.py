@@ -23,6 +23,7 @@ from llm_gateway.providers.validation import (
     reject_file_attachments,
     reject_tools,
     reject_unsendable_image_options,
+    reject_visual_inputs,
 )
 from llm_gateway.usage import ImageUsage, TokenUsage
 
@@ -54,6 +55,7 @@ class GeminiAdapter:
         self._client = client
 
     async def generate(self, request: LLMRequest, *, model: str) -> ProviderResponse:
+        reject_visual_inputs(request, provider=self.name)
         reject_file_attachments(request, provider=self.name)
         reject_tools(request, provider=self.name)
         # Built before the call, and refused as configuration: a schema that

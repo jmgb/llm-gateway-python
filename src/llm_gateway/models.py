@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-11-13"
+CATALOG_VERSION = "2026-11-17"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -111,6 +111,13 @@ class ModelInfo:
     provider seen so far, so the table is keyed by it when the provider
     publishes more than one."""
 
+    input_modalities: tuple[Literal["text", "image", "video", "audio", "file"], ...] | None = None
+    """Published input types where verified; ``None`` means not catalogued.
+
+    Separate from ``modality``, which describes the output API. A video
+    understanding model still produces text and uses token accounting.
+    """
+
     @property
     def rate(self) -> ModelRate:
         """USD per million tokens read as microUSD per token — same number."""
@@ -182,11 +189,13 @@ def _m(
     image_price: str | None = None,
     image_output_price_per_mtok: str | None = None,
     image_input_price_per_mtok: str | None = None,
+    input_modalities: tuple[Literal["text", "image", "video", "audio", "file"], ...] | None = None,
     video_price_per_second: str | None = None,
     video_prices_by_resolution: dict[str, str] | None = None,
 ) -> ModelInfo:
     return ModelInfo(
         id=model_id,
+        input_modalities=input_modalities,
         provider=provider,
         input_usd_per_mtok=Decimal(input_price),
         output_usd_per_mtok=Decimal(output_price),
@@ -669,6 +678,15 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         notes="floating alias; prefer a pinned id",
     ),
     _m("qwen/qwen3.8-max", "openrouter", "2.00", "6.00"),
+    _m(
+        "qwen/qwen4-max",
+        "openrouter",
+        "1.425",
+        "4.275",
+        reasoning_efforts=("none", "low", "high", "xhigh"),
+        input_modalities=("text", "image", "video"),
+        notes="1M context; OpenRouter API rates verified 2026-11-17; upstream rates vary",
+    ),
     _m("deepseek/deepseek-chat-v3.1", "openrouter", "0.28", "0.42", deprecated=True),
     _m(
         "deepseek/deepseek-r1-distill-qwen-7b",

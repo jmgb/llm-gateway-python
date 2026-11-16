@@ -52,6 +52,24 @@ neutrality — dropping the schema makes every structured call fall back, and
 omitting the word makes every plain JSON call a 400. Both are louder product
 decisions than saying the sentence.
 
+## Visual inputs to text generation
+
+`inputs.py` holds `ImageInput` and `VideoInput`. Image generation keeps using
+that same `ImageInput`; analysis attaches sources to each user `Message` through
+its `images` and `videos` tuples. Sources remain on their own turn across
+history, retries and fallbacks, and never travel to usage or event sinks.
+OpenRouter serialises bytes as data URLs and preserves supplied URLs. The other
+text adapters reject these fields before dispatch until they can translate
+them, so a fallback cannot silently discard the footage and answer the prompt
+alone. Reading, downloading, clipping and transcoding belong to the application.
+
+`ModelInfo.input_modalities` is optional verified metadata, distinct from
+`modality`: a model that understands video and answers with text still uses
+`LLMGateway.generate()` and token accounting. `None` means unknown, not a
+text-only declaration. OpenRouter input support is model-dependent; this
+metadata does not expand the capabilities of other adapters. Selecting a default
+video analysis model remains an application decision.
+
 ## Layers
 
 ```
