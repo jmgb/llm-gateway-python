@@ -11,6 +11,15 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Added
 
+- Current OpenRouter video-understanding routes for
+  `bytedance-seed/seed-2-1-turbo`, `bytedance-seed/seed-2.0-mini`,
+  `bytedance-seed/seed-2.0-lite` and `qwen/qwen3.8-omni-flash`.
+  Record verified input modalities for the existing OpenRouter Gemini 4
+  Hydrogen and Carbon routes. Gemini 2.5 and Seed 1.6 are not added.
+- Generic whole-request context price bands in `ModelRate.context_tiers` and
+  `ModelInfo.context_tiers`. Missing input usage keeps output pricing an
+  explicit lower bound; custom flat overrides replace the built-in bands.
+
 - Catalogue `qwen/qwen4-max` through OpenRouter with text, image and video
   inputs, and `none`, `low`, `high` and `xhigh` reasoning efforts.
 - Generic per-user-message `images` and `videos`, reusing `ImageInput` and
@@ -20,6 +29,10 @@ consumer pins an immutable tag and upgrades through its own pull request.
   separate from output modality and pricing units.
 
 ### Changed
+
+- **Cost-affecting:** Seed 2.0 Mini and Lite use doubled input **and output**
+  rates from 128,000 input tokens. Catalogue version `2026-11-17.1` records
+  the new model rates and includes context bands in the pricing fingerprint.
 
 - **Cost-affecting:** add Qwen4 Max at OpenRouter's November 17 API rates of
   `$1.425` input / `$4.275` output per 1M tokens and move `CATALOG_VERSION` to

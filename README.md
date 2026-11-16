@@ -705,6 +705,34 @@ analysis model; this package supplies no feature-specific default. JSON output,
 local schema validation, retries and opt-in fallbacks use the usual `LLMRequest`
 options. OpenRouter's existing tool-calling restriction still applies.
 
+The current video-understanding routes through OpenRouter include:
+
+| Model id | Input / 1M tokens | Output / 1M tokens |
+|---|---:|---:|
+| `bytedance-seed/seed-2-1-turbo` | `$0.50` | `$2.50` |
+| `bytedance-seed/seed-2.0-lite` | `$0.25` | `$2.00` |
+| `bytedance-seed/seed-2.0-mini` | `$0.10` | `$0.40` |
+| `qwen/qwen3.8-omni-flash` | `$0.15` | `$0.47` |
+| `qwen/qwen4-max` | `$1.425` | `$4.275` |
+| `google/gemini-4-hydrogen` | `$1.50` | `$7.50` |
+| `google/gemini-4-carbon` | `$2.00` | `$10.00` |
+
+These are the November 17, 2026 [OpenRouter API](https://openrouter.ai/api/v1/models)
+rates, not fixed costs per minute of footage. Seed 2.0 Mini and Lite double
+**both** rates at 128,000 input tokens; the catalogue applies that band to the
+whole request. Seed routes have a 262,144-token context; Qwen routes have 1M,
+and the Gemini 4 routes have 1,048,576. Carbon's current rate is introductory;
+see [pricing](docs/pricing.md) for the December review.
+
+Seed Mini and Lite expose `none`, `minimal`, `low`, `medium` and `high`
+reasoning effort. Seed 2.1 Turbo and Qwen3.8 Omni Flash publish no discrete
+effort levels, so the gateway leaves reasoning to their provider defaults.
+The model's published audio/file input metadata does not imply that this
+adapter can send standalone audio/file parts: this path sends text, images
+and videos. Gemini 2.5 and Seed 1.6 are not added by this integration. For video
+fallbacks, use an explicit chain of video-capable models: `cheaper_than()`
+compares base prices and does not filter by supported input modalities.
+
 ### Routing to OpenRouter
 
 Models reach it by their namespace, so nothing needs configuring:

@@ -564,8 +564,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-11-17"
-    PRICE_FINGERPRINT = "4dca229e1df833eeee758f4d13369f2050d2b82860a329c3e4b4052cc70982fb"
+    PRICED_AT_VERSION = "2026-11-17.1"
+    PRICE_FINGERPRINT = "8d86b11396f61542769f1d5e79b81a0d2faab483ea67b182961e02f4da0b4186"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -580,6 +580,12 @@ class TestPricesAndVersionMoveTogether:
             rates = info.video_usd_per_second_by_resolution
             return sorted((name, str(rate.quantize(micro))) for name, rate in rates.items())
 
+        def by_context(info: ModelInfo) -> list[tuple[int, str, str]]:
+            return [
+                (threshold, str(input_rate.quantize(micro)), str(output_rate.quantize(micro)))
+                for threshold, input_rate, output_rate in info.context_tiers
+            ]
+
         priced = sorted(
             f"{info.id}\t{info.pricing_unit}"
             f"\t{info.input_usd_per_mtok.quantize(micro)}"
@@ -591,6 +597,7 @@ class TestPricesAndVersionMoveTogether:
             f"\t{(info.video_usd_per_second or Decimal('0')).quantize(micro)}"
             f"\t{by_resolution(info)}"
             f"\t{info.audio_minimum_seconds}"
+            f"\t{by_context(info)}"
             for info in MODEL_CATALOG.values()
         )
         return hashlib.sha256("\n".join(priced).encode()).hexdigest()

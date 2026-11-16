@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-11-17"
+CATALOG_VERSION = "2026-11-17.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -111,6 +111,8 @@ class ModelInfo:
     provider seen so far, so the table is keyed by it when the provider
     publishes more than one."""
 
+    context_tiers: tuple[tuple[int, Decimal, Decimal], ...] = ()
+    """Inclusive input-token thresholds and whole-request token rates."""
     input_modalities: tuple[Literal["text", "image", "video", "audio", "file"], ...] | None = None
     """Published input types where verified; ``None`` means not catalogued.
 
@@ -126,6 +128,7 @@ class ModelInfo:
         return ModelRate(
             input_microusd_per_token=self.input_usd_per_mtok,
             output_microusd_per_token=self.output_usd_per_mtok,
+            context_tiers=self.context_tiers,
         )
 
     @property
@@ -190,12 +193,17 @@ def _m(
     image_output_price_per_mtok: str | None = None,
     image_input_price_per_mtok: str | None = None,
     input_modalities: tuple[Literal["text", "image", "video", "audio", "file"], ...] | None = None,
+    context_prices: tuple[tuple[int, str, str], ...] = (),
     video_price_per_second: str | None = None,
     video_prices_by_resolution: dict[str, str] | None = None,
 ) -> ModelInfo:
     return ModelInfo(
         id=model_id,
         input_modalities=input_modalities,
+        context_tiers=tuple(
+            (threshold, Decimal(input_rate), Decimal(output_rate))
+            for threshold, input_rate, output_rate in context_prices
+        ),
         provider=provider,
         input_usd_per_mtok=Decimal(input_price),
         output_usd_per_mtok=Decimal(output_price),
@@ -614,6 +622,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "openrouter",
         "1.50",
         "7.50",
+        input_modalities=("text", "image", "audio", "video", "file"),
         notes="Gemini 4 Hydrogen; reasoning effort forwarded to the model",
         reasoning_efforts=GEMINI_4_HYDROGEN_REASONING_EFFORTS,
         supports_temperature=False,
@@ -623,6 +632,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "openrouter",
         "2.00",
         "10.00",
+        input_modalities=("text", "image", "audio", "video", "file"),
         notes=(
             "OpenRouter currently lists USD 2/10 per MTok; Google changes to "
             "USD 4/20 on 2026-12-01, so reverify OpenRouter's rate then"
@@ -676,6 +686,42 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "2.90",
         "14.00",
         notes="floating alias; prefer a pinned id",
+    ),
+    _m(
+        "bytedance-seed/seed-2-1-turbo",
+        "openrouter",
+        "0.50",
+        "2.50",
+        input_modalities=("text", "image", "video"),
+        notes="262144 context; reasoning uses provider defaults (no published effort levels)",
+    ),
+    _m(
+        "bytedance-seed/seed-2.0-lite",
+        "openrouter",
+        "0.25",
+        "2.00",
+        input_modalities=("text", "image", "video"),
+        reasoning_efforts=("none", "minimal", "low", "medium", "high"),
+        context_prices=((128000, "0.50", "4.00"),),
+        notes="262144 context; both rates double at 128000 input tokens",
+    ),
+    _m(
+        "bytedance-seed/seed-2.0-mini",
+        "openrouter",
+        "0.10",
+        "0.40",
+        input_modalities=("text", "image", "video"),
+        reasoning_efforts=("none", "minimal", "low", "medium", "high"),
+        context_prices=((128000, "0.20", "0.80"),),
+        notes="262144 context; both rates double at 128000 input tokens",
+    ),
+    _m(
+        "qwen/qwen3.8-omni-flash",
+        "openrouter",
+        "0.15",
+        "0.47",
+        input_modalities=("text", "image", "audio", "video"),
+        notes="1M context; reasoning uses provider defaults (token budget, not effort levels)",
     ),
     _m("qwen/qwen3.8-max", "openrouter", "2.00", "6.00"),
     _m(

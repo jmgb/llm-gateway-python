@@ -46,9 +46,21 @@ class ModelRate:
 
     input_microusd_per_token: Decimal
     output_microusd_per_token: Decimal
+    context_tiers: tuple[tuple[int, Decimal, Decimal], ...] = ()
+    """Inclusive input-token thresholds with whole-request input/output rates.
+
+    A longer prompt can change the output rate too. These are price bands,
+    not marginal blocks: the matching pair prices every token of the request.
+    """
 
     def __post_init__(self) -> None:
-        rates = (self.input_microusd_per_token, self.output_microusd_per_token)
+        rates = [self.input_microusd_per_token, self.output_microusd_per_token]
+        previous_threshold = 0
+        for threshold, input_rate, output_rate in self.context_tiers:
+            if threshold <= previous_threshold:
+                raise ValueError("context thresholds must be positive, unique and increasing")
+            previous_threshold = threshold
+            rates.extend((input_rate, output_rate))
         if any(not rate.is_finite() or rate < 0 for rate in rates):
             raise ValueError("token rates must be finite and non-negative")
 
@@ -261,9 +273,19 @@ class StaticPriceCatalog:
         if billable_input is None and billable_output is None:
             return Cost.unavailable(pricing_version=self._version)
 
+        input_rate = rate.input_microusd_per_token
+        output_rate = rate.output_microusd_per_token
+        for threshold, tier_input, tier_output in rate.context_tiers:
+            if billable_input is None:
+                # Missing context length cannot justify a dearer output band;
+                # the known output is still priceable as an explicit lower bound.
+                output_rate = min(output_rate, tier_output)
+            elif billable_input >= threshold:
+                input_rate, output_rate = tier_input, tier_output
+            else:
+                break
         raw = (
-            Decimal(billable_input or 0) * rate.input_microusd_per_token
-            + Decimal(billable_output or 0) * rate.output_microusd_per_token
+            Decimal(billable_input or 0) * input_rate + Decimal(billable_output or 0) * output_rate
         )
         microusd = int(raw.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 

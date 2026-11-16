@@ -122,7 +122,10 @@ def test_token_rates_cannot_be_negative_or_non_finite(field: str) -> None:
     for invalid in (Decimal("-1"), Decimal("Infinity"), Decimal("NaN")):
         values[field] = invalid
         with pytest.raises(ValueError, match="finite and non-negative"):
-            ModelRate(**values)
+            ModelRate(
+                input_microusd_per_token=values["input_microusd_per_token"],
+                output_microusd_per_token=values["output_microusd_per_token"],
+            )
 
 
 def test_every_non_token_rate_must_also_be_finite() -> None:

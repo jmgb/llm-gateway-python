@@ -84,6 +84,40 @@ them as a breakdown without adding them to the bill again. Clip duration,
 resolution and frame sampling affect tokenisation: a token rate alone cannot
 establish a fixed cost per minute of footage.
 
+## OpenRouter Seed and Qwen video alternatives
+
+The [OpenRouter models API](https://openrouter.ai/api/v1/models), checked on
+November 17, 2026, publishes these rates in USD per 1M tokens:
+
+| Model | Input below 128,000 tokens | Output below 128,000 input tokens | Input from 128,000 tokens | Output from 128,000 input tokens |
+|---|---:|---:|---:|---:|
+| `bytedance-seed/seed-2.0-mini` | `$0.10` | `$0.40` | `$0.20` | `$0.80` |
+| `bytedance-seed/seed-2.0-lite` | `$0.25` | `$2.00` | `$0.50` | `$4.00` |
+| `bytedance-seed/seed-2-1-turbo` | `$0.50` | `$2.50` | `$0.50` | `$2.50` |
+| `qwen/qwen3.8-omni-flash` | `$0.15` | `$0.47` | `$0.15` | `$0.47` |
+
+`ModelRate.context_tiers` and `ModelInfo.context_tiers` contain tuples of
+`(minimum_input_tokens, input_rate, output_rate)`. Thresholds are inclusive,
+positive, unique and increasing; prices use the same units as the base rates.
+The highest matching band replaces both rates for the **whole request**, not
+just tokens above the threshold. Total billable input selects the band,
+including reported retrieved-document tokens and without subtracting cached
+tokens. Cache pricing behaviour is unchanged.
+
+When input usage is unknown, the known output uses the cheapest possible
+output band and the amount remains an `ESTIMATED` lower bound. An override
+through `builtin_price_catalog(overrides=..., version=...)` replaces the whole
+model rate with the caller's flat pair, including removal of any built-in
+context bands. `FallbackPolicy.cheaper_than()` still compares base rates,
+not context bands or media support; it builds candidates rather than a
+request-specific price guarantee. Applications needing custom bands can inject a
+`StaticPriceCatalog` with their own version and `ModelRate` entries.
+
+These additions move `CATALOG_VERSION` to `2026-11-17.1`; its fingerprint now
+includes context thresholds and both rates in each band. Gemini 4 Hydrogen and
+Carbon retain their existing prices and reasoning configuration, with their
+verified video input metadata now recorded for OpenRouter.
+
 ## The three measurements
 
 `Cost.measurement` is as important as the amount:

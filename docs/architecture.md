@@ -70,6 +70,14 @@ text-only declaration. OpenRouter input support is model-dependent; this
 metadata does not expand the capabilities of other adapters. Selecting a default
 video analysis model remains an application decision.
 
+Context-dependent token prices are declared in `ModelInfo.context_tiers` and
+carried into `ModelRate`. `StaticPriceCatalog` selects the whole-request band
+from billable input tokens before pricing either side. Thresholds and both
+rates are part of the catalogue fingerprint, so a long-video price cannot
+change without a new catalogue version. The gateway still prices each attempt
+separately before aggregating costs; combining token totals across retries
+would select a context band no individual request reached.
+
 ## Layers
 
 ```
