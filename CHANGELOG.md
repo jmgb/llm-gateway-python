@@ -19,7 +19,6 @@ consumer pins an immutable tag and upgrades through its own pull request.
 - Generic whole-request context price bands in `ModelRate.context_tiers` and
   `ModelInfo.context_tiers`. Missing input usage keeps output pricing an
   explicit lower bound; custom flat overrides replace the built-in bands.
-
 - Catalogue `qwen/qwen4-max` through OpenRouter with text, image and video
   inputs, and `none`, `low`, `high` and `xhigh` reasoning efforts.
 - Generic per-user-message `images` and `videos`, reusing `ImageInput` and
@@ -30,14 +29,12 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Changed
 
-- **Cost-affecting:** Seed 2.0 Mini and Lite use doubled input **and output**
-  rates from 128,000 input tokens. Catalogue version `2026-11-17.1` records
-  the new model rates and includes context bands in the pricing fingerprint.
-
-- **Cost-affecting:** add Qwen4 Max at OpenRouter's November 17 API rates of
-  `$1.425` input / `$4.275` output per 1M tokens and move `CATALOG_VERSION` to
-  `2026-11-17`. Video understanding uses token accounting; reasoning remains
-  included in billed output tokens. Upstream rates may differ.
+- **Cost-affecting:** catalogue version `2026-11-17.1` adds the new model
+  rates and includes context bands in the pricing fingerprint. Seed 2.0 Mini
+  and Lite use doubled input **and output** rates from 128,000 input tokens.
+  Qwen4 Max uses OpenRouter's November 17 API rates of `$1.425` input /
+  `$4.275` output per 1M tokens; upstream rates may differ. Video understanding
+  uses token accounting, with reasoning included in billed output tokens.
 
 ## [0.22.0] — 2026-11-13
 
