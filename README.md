@@ -670,7 +670,7 @@ from llm_gateway import ImageInput, LLMRequest, Message, VideoInput
 
 result = await gateway.generate(
     LLMRequest(
-        model="qwen/qwen4-max",
+        model="google/gemini-4-hydrogen",
         messages=(
             Message(
                 "user",
