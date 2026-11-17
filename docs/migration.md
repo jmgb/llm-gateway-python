@@ -274,3 +274,64 @@ through Google's `thinking_level` or OpenRouter's `reasoning.effort`.
 The Gemini extra now requires `google-genai>=2.34,<3`. The package requires
 Python 3.13 or newer. See [pricing](pricing.md) for current rates and the
 announced end of Carbon's introductory Google rate.
+
+## Adding video to a consumer facade (0.23.0)
+
+Updating a dependency makes `VideoInput` available; it does not add a video
+parameter to your application's `gpt_request` or equivalent. The complete
+[OpenRouter example](../README.md#image-and-video-understanding) shows client
+construction, local file reading and a request without an application facade.
+For an existing integration:
+
+1. Pin `neutral-llm-gateway[openrouter]==0.23.0`, preserving the other extras you
+   use, and regenerate the lockfile. The runtime requires Python 3.13 or later.
+2. Build and register an OpenRouter client using the application's credential.
+   A registered Google client does not serve `google/gemini-4-hydrogen`.
+3. Add an optional keyword-only `videos: tuple[VideoInput, ...] = ()` parameter
+   to the facade and forward it through every intermediate runner/message
+   builder. Keep existing positional arguments, text defaults, tenant accounting
+   and return shape intact.
+4. Put the sources on the user turn they belong to as `Message.videos`.
+   `LLMRequest.attachments` references uploaded provider file IDs and is not the
+   video-input channel. Preserve these fields when rebuilding history; never
+   turn sources into strings or URLs embedded only in prompt text.
+5. Call `LLMGateway.generate()` with an OpenRouter model that accepts video.
+   `google/gemini-4-hydrogen` is the example model; the application's video
+   default belongs to its own configuration. `generate_video()` creates new
+   footage and does not analyse a supplied clip.
+
+This minimal typed facade illustrates the forwarding step; keep the existing
+request options and result mapping in your real facade:
+
+```python
+from llm_gateway import LLMGateway, LLMRequest, LLMResult, Message, VideoInput
+
+
+async def gpt_request(
+    gateway: LLMGateway,
+    user_message: str,
+    *,
+    model: str,
+    videos: tuple[VideoInput, ...] = (),
+) -> LLMResult:
+    return await gateway.generate(
+        LLMRequest(
+            model=model,
+            messages=(Message("user", user_message, videos=videos),),
+        )
+    )
+```
+
+Use `VideoInput(data=clip_bytes, mime_type="video/mp4")` or
+`VideoInput(url=provider_accessible_url)`. Supply exactly one source. The package
+encodes bytes for OpenRouter without uploading a file separately or downloading
+a URL. File acquisition and provider-specific size/duration limits remain the
+application's responsibility.
+
+Keep fallbacks explicit and video-capable: `cheaper_than()` compares base rates
+without filtering media support, and the other adapters currently reject visual
+inputs before dispatch. Before deploying a consumer, check its actual facade
+against an injected client: the outgoing user message must contain a
+`video_url` content part, existing text-only calls must still work, and media
+content must stay out of usage/event sinks. Reinstall the pinned package and
+deploy the consumer for its production workers to use the new version.

@@ -665,32 +665,78 @@ unchanged. OpenRouter translates these sources to `image_url` and `video_url`
 parts on the same turn. Its model must support the requested input types;
 the other adapters currently reject visual message inputs before dispatch.
 
-```python
-from llm_gateway import ImageInput, LLMRequest, Message, VideoInput
+Video inputs are available from **0.23.0** and require Python 3.13 or later.
+Install the OpenRouter transport in the consuming project:
 
-result = await gateway.generate(
-    LLMRequest(
-        model="google/gemini-4-hydrogen",
-        messages=(
-            Message(
-                "user",
-                "Describe the changes between this frame and the clip.",
-                images=(ImageInput(url="https://example.com/frame.jpg"),),
-                videos=(VideoInput(data=clip_bytes, mime_type="video/mp4"),),
-            ),
-        ),
-        reasoning_effort="low",
-        max_output_tokens=2048,
-    )
-)
+```bash
+uv add "neutral-llm-gateway[openrouter]==0.23.0"
+# Or: pip install "neutral-llm-gateway[openrouter]==0.23.0"
 ```
 
-Build this gateway with an OpenRouter client as shown below. Sources may use
-`url=` (including a base64 data URL) or `data=` bytes; video bytes require an
-explicit video MIME type. The application reads local files and owns trimming,
-compression, hosting and any audio transcription. URL support and video limits
-depend on the upstream provider; inline bytes avoid requiring it to fetch a
-public URL. The gateway never downloads a source.
+Keep any other extras your application already uses when updating its pin,
+then regenerate its lockfile. Set `OPENROUTER_API_KEY` in the application's
+environment. This complete example reads a local `clip.mp4` and analyses it
+through OpenRouter:
+
+```python
+import asyncio
+import os
+from pathlib import Path
+
+from llm_gateway import LLMGateway, LLMRequest, Message, VideoInput
+from llm_gateway.factories import build_registry, create_openrouter_client
+
+
+async def main() -> None:
+    async with create_openrouter_client(
+        api_key=os.environ["OPENROUTER_API_KEY"],
+    ) as client:
+        gateway = LLMGateway(registry=build_registry(openrouter_client=client))
+        result = await gateway.generate(
+            LLMRequest(
+                model="google/gemini-4-hydrogen",
+                messages=(
+                    Message(
+                        "user",
+                        "Describe the actions in this video, with timestamps.",
+                        videos=(
+                            VideoInput(
+                                data=Path("clip.mp4").read_bytes(),
+                                mime_type="video/mp4",
+                            ),
+                        ),
+                    ),
+                ),
+                reasoning_effort="low",
+                max_output_tokens=2048,
+            )
+        )
+        print(result.text)
+        print(result.cost.amount_usd)  # None when the cost is unavailable
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The application reads the environment here; the package never loads keys or
+`.env` files itself. Register `openrouter_client` even if you already have a
+Google client: `google/gemini-4-hydrogen` uses OpenRouter, while
+`gemini-4-hydrogen` selects the direct Google adapter, which currently rejects
+visual message inputs.
+
+For a remote source, replace the `VideoInput(...)` with
+`VideoInput(url="https://example.com/clip.mp4")`; a base64 data URL is also
+accepted. Supply exactly one of `data` or `url`. Video bytes require an explicit
+video MIME type. Images can accompany a video on the same user turn through
+`images=(ImageInput(...),)`.
+
+The application owns file reading, trimming, compression, hosting and any
+separate audio transcription. URL support and video limits depend on the
+upstream provider; inline bytes avoid requiring it to fetch a public URL.
+The gateway never downloads a source. If callers go through a text-only facade
+such as `gpt_request`, upgrading the dependency alone does not forward videos:
+follow [Adding video to a consumer facade](docs/migration.md#adding-video-to-a-consumer-facade-0230).
 
 `qwen/qwen4-max` accepts **text, images and video**, returns text, has a 1M-token
 context, and offers `none`, `low`, `high` and `xhigh` reasoning. Audio and native
