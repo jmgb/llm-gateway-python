@@ -9,10 +9,12 @@ tier — lives in `docs/architecture.md`.
 
 - [ ] **P5 — Support inline files (images and PDFs as bytes) in the neutral contract.**
 
-  Today `LLMRequest.attachments` only carries already-uploaded OpenAI file IDs,
-  every provider declares `inline_files=False`, and OpenRouter rejects any
-  attachment. Clients that send a photo or a PDF therefore patch each provider
-  themselves. Presupuestor does it in its compatibility layer and is the
+  Version 0.23.0 supports image bytes through `Message.images` on OpenRouter,
+  alongside `Message.videos`. This item remains open for PDFs and inline-file
+  handling on the other adapters. `LLMRequest.attachments` still carries only
+  already-uploaded OpenAI file IDs, every provider declares `inline_files=False`,
+  and OpenRouter rejects that attachment channel. Consumers still patch the
+  missing paths themselves. Presupuestor does it in its compatibility layer and is the
   reference implementation to lift from (repo `presupuestor`,
   `backend/app/core/llm_gateway_compat.py`, commit `76804006c`, 2026-11-12):
 
@@ -72,3 +74,21 @@ tier — lives in `docs/architecture.md`.
 
   It is real money, so it stays deselected with the rest of `-m live`: about
   USD 0.51 for a five-second 480p clip, the model's own default length.
+
+## Consumer rollout
+
+- [ ] **Publish and deploy the 0.23.0 consumer upgrades.**
+
+  The gateway is published on PyPI, tagged `v0.23.0`, and its GitHub CI and
+  artifact audits passed. Dependency pins, lockfiles and local installations
+  are updated in `../comunicador` (commit `ca5080e`, 35 targeted tests) and
+  `../presupuestor` (commit `e7d6f9908`, 44 targeted tests). The selected video
+  analysis model is `google/gemini-4-hydrogen`, recorded in consumer commits
+  `7a3eb04` and `8f1525463` respectively; the gateway supplies no product default.
+
+  These consumer commits have not been pushed or deployed by this session.
+  Both worktrees now contain other agents' active changes: inspect their
+  current state and pending history before publishing, run each project's
+  required pre-push checks, and follow its deployment procedure with explicit
+  authorisation. The user is coordinating model trials and video-flow
+  integration in another session; do not duplicate those changes here.
