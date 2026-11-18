@@ -821,15 +821,13 @@ resolution and are priced through a `VideoPriceCatalog`. Override prices for neg
 catalog protocol yourself. See
 [`docs/pricing.md`](docs/pricing.md).
 
-The catalogue's current OpenAI reasoning family is `gpt-6-astra` at `$10`
-input / `$50` output per million tokens, `gpt-6.1-sol` and `gpt-6-sol` at
-`$2` / `$10`, and `gpt-6-luna` at `$0.10` / `$0.50`. All four share one set of
-routing and
-request-option rules: reasoning efforts are `none`, `low`, `medium`, `high`,
-`xhigh` and `max`; `temperature` is omitted because the models reject it; and
-`verbosity` is forwarded when requested. The `gpt-5.6-sol` and `gpt-5.6-luna`
-they replace stay resolvable for a pinned caller, but are marked deprecated so
-no derived fallback chain lands back on the dearer generation.
+The catalogue includes `gpt-6-astra` at `$10` input / `$50` output and
+`gpt-6-luna` at `$0.10` / `$0.50` per million tokens. The standard rate
+for `gpt-6.2-sol` is `$2` / `$10` through 272,000 input tokens and
+`$4` / `$15` above that threshold. Sol 6.2 accepts `low`, `medium`,
+`high`, `xhigh` and `max`. The gateway omits `temperature` and forwards
+`verbosity` when requested. Earlier Sol versions stay resolvable for pinned
+callers and are excluded from derived fallback chains.
 
 ## Not in this version
 

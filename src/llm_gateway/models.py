@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-11-17.1"
+CATALOG_VERSION = "2026-11-18.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -246,8 +246,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     # and sending it fails the whole call. A fallback onto one of these must not
     # inherit it.
     #
-    # gpt-6-sol is superseded by gpt-6.1-sol at the same rates. Kept resolvable
-    # for pinned callers; deprecated so no fallback picks it.
+    # Earlier Sol versions stay resolvable for pinned callers and historical costs.
     _m(
         "gpt-6-sol",
         "openai",
@@ -257,15 +256,23 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
     ),
-    # Latest Sol generation, at gpt-6-sol's rates. Its cheaper cache reads are
-    # not modelled: cached input is priced at the full input rate.
     _m(
         "gpt-6.1-sol",
         "openai",
         "2.00",
         "10.00",
+        deprecated=True,
         reasoning_efforts=OPENAI_REASONING_EFFORTS,
         supports_temperature=False,
+    ),
+    _m(
+        "gpt-6.2-sol",
+        "openai",
+        "2.00",
+        "10.00",
+        reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
+        supports_temperature=False,
+        context_prices=((272_001, "4.00", "15.00"),),
     ),
     _m(
         "gpt-6-luna",

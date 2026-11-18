@@ -27,8 +27,8 @@ class TestIdentity:
         """One family, one set of request options: only the rates separate them."""
         sol = lookup_model("gpt-6.1-sol")
         assert sol is not None
-        # gpt-6-sol is the superseded twin: same everything, only deprecated.
-        assert lookup_model("gpt-6-sol") == replace(sol, id="gpt-6-sol", deprecated=True)
+        assert sol.deprecated
+        assert lookup_model("gpt-6-sol") == replace(sol, id="gpt-6-sol")
 
         rates = {
             "gpt-6-astra": (Decimal("10"), Decimal("50")),
@@ -41,6 +41,7 @@ class TestIdentity:
             assert info == replace(
                 sol,
                 id=model_id,
+                deprecated=False,
                 input_usd_per_mtok=input_price,
                 output_usd_per_mtok=output_price,
             )
@@ -48,7 +49,7 @@ class TestIdentity:
 
     def test_gpt_6_sol_and_luna_are_priced_at_their_published_rates(self) -> None:
         expected = {
-            "gpt-6.1-sol": ("2", "10"),
+            "gpt-6.2-sol": ("2", "10"),
             "gpt-6-luna": ("0.10", "0.50"),
         }
 
@@ -564,8 +565,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-11-17.1"
-    PRICE_FINGERPRINT = "8d86b11396f61542769f1d5e79b81a0d2faab483ea67b182961e02f4da0b4186"
+    PRICED_AT_VERSION = "2026-11-18.1"
+    PRICE_FINGERPRINT = "bc58676d2777ffc4b70d073a7e5486f636745ed9e265584c1c318d0b10de1eed"
 
     @staticmethod
     def _fingerprint() -> str:
@@ -658,3 +659,15 @@ class TestModelInfo:
 
         assert info.rate.input_microusd_per_token == Decimal("1.25")
         assert info.rate.output_microusd_per_token == Decimal("10")
+
+
+def test_gpt_6_2_sol_uses_openai_reasoning_and_context_rates() -> None:
+    info = lookup_model("gpt-6.2-sol")
+    assert info is not None
+    assert info.provider == "openai"
+    assert info.reasoning_efforts == ("low", "medium", "high", "xhigh", "max")
+    assert info.supports_temperature is False
+    assert info.deprecated is False
+    assert info.input_usd_per_mtok == Decimal("2.00")
+    assert info.output_usd_per_mtok == Decimal("10.00")
+    assert info.context_tiers == ((272_001, Decimal("4.00"), Decimal("15.00")),)

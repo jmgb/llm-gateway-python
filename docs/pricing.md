@@ -42,15 +42,17 @@ The current OpenAI reasoning models in the catalogue are priced as follows:
 | Model | Input / 1M tokens | Output / 1M tokens |
 |---|---:|---:|
 | `gpt-6-astra` | `$10` | `$50` |
-| `gpt-6.1-sol` | `$2` | `$10` |
+| `gpt-6.2-sol` (up to 272,000 input tokens) | `$2` | `$10` |
+| `gpt-6.2-sol` (above 272,000 input tokens) | `$4` | `$15` |
+| `gpt-6.1-sol` (deprecated) | `$2` | `$10` |
 | `gpt-6-sol` (deprecated) | `$2` | `$10` |
 | `gpt-5.6-terra` | `$2` | `$12` |
 | `gpt-6-luna` | `$0.10` | `$0.50` |
 | `gpt-5.6-sol` (deprecated) | `$5` | `$30` |
 | `gpt-5.6-luna` (deprecated) | `$0.20` | `$1.20` |
 
-The four `gpt-6` models share one set of request options: they accept the same
-reasoning efforts, drop `temperature`, and forward `verbosity` to OpenAI.
+Sol 6.2 supports `low`, `medium`, `high`, `xhigh` and `max` reasoning
+effort. The gateway drops `temperature` and forwards `verbosity` to OpenAI.
 
 ## Gemini 4 standard rates
 
