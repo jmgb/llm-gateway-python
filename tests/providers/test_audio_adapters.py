@@ -194,16 +194,29 @@ class FakeAssemblyAIClient:
 
 
 class TestAssemblyAITranscription:
-    async def test_it_submits_and_polls_a_public_audio_url(self) -> None:
+    @pytest.mark.parametrize(
+        ("model", "speech_model", "formatting"),
+        [
+            ("assemblyai-universal-3-pro", "universal-3-pro", {}),
+            (
+                "assemblyai-stt-3-7",
+                "assemblyai-stt-3-7",
+                {"disfluencies": False, "format_text": True},
+            ),
+        ],
+    )
+    async def test_it_submits_and_polls_a_public_audio_url(
+        self, model: str, speech_model: str, formatting: dict[str, bool]
+    ) -> None:
         client = FakeAssemblyAIClient()
         response = await AssemblyAIAdapter(client, poll_interval_seconds=0).transcribe(
             _request(
-                model="assemblyai-universal-3-pro",
+                model=model,
                 audio=AudioInput(url="https://storage.example/acta.m4a"),
                 speaker_labels=True,
                 prompt="Construction site meeting",
             ),
-            model="assemblyai-universal-3-pro",
+            model=model,
         )
 
         assert response.text == "acta transcrita"
@@ -217,7 +230,8 @@ class TestAssemblyAITranscription:
                     "language_code": "es",
                     "prompt": "Construction site meeting",
                     "speaker_labels": True,
-                    "speech_models": ["universal-3-pro"],
+                    "speech_models": [speech_model],
+                    **formatting,
                 },
             )
         ]

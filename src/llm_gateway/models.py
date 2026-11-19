@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-11-18.1"
+CATALOG_VERSION = "2026-11-19"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -447,6 +447,16 @@ _ENTRIES: tuple[ModelInfo, ...] = (
     _m("meta-llama/llama-4-maverick-17b-128e-instruct", "groq", "0.50", "0.77", deprecated=True),
     # ---- AssemblyAI ------------------------------------------------------
     _m(
+        "assemblyai-stt-3-7",
+        "assemblyai",
+        "0",
+        "0",
+        notes="pre-recorded speech-to-text; base rate of USD 0.21 per audio hour",
+        supports_temperature=False,
+        pricing_unit="audio_minutes",
+        audio_price_per_minute="0.0035",
+    ),
+    _m(
         "assemblyai-universal-3-pro",
         "assemblyai",
         "0",
@@ -455,6 +465,7 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         supports_temperature=False,
         pricing_unit="audio_minutes",
         audio_price_per_minute="0.0035",
+        deprecated=True,
     ),
     _m(
         "assemblyai-universal-2",

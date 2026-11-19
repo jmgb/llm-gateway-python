@@ -9,6 +9,18 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- Support `assemblyai-stt-3-7` for pre-recorded audio with contextual prompts
+  and speaker diarization. The adapter requests formatted text and removes
+  disfluencies.
+
+### Changed
+
+- **Cost-affecting:** catalogue version `2026-11-19` adds the model's base
+  rate of USD 0.21 per audio hour. Universal-3 Pro is marked deprecated and
+  remains callable.
+
 ## [0.23.0] — 2026-11-17
 
 ### Added

@@ -19,7 +19,9 @@ from llm_gateway.providers.error_mapping import classify_provider_error
 
 CAPABILITIES = ProviderCapabilities(audio_transcription=True)
 
+_STT_3_7 = "assemblyai-stt-3-7"
 _MODEL_TO_SPEECH_MODEL = {
+    _STT_3_7: _STT_3_7,
     "assemblyai-universal-3-pro": "universal-3-pro",
     "assemblyai-universal-2": "universal-2",
 }
@@ -85,7 +87,7 @@ class AssemblyAIAdapter:
             raise ConfigurationError(f"unsupported AssemblyAI transcription model: {model}")
         if request.audio.url is None:
             raise ConfigurationError("AssemblyAI transcription requires a public audio URL")
-        if request.prompt is not None and speech_model != "universal-3-pro":
+        if request.prompt is not None and speech_model == "universal-2":
             raise ConfigurationError("AssemblyAI Universal-2 does not support a prompt")
 
         payload: dict[str, Any] = {
@@ -93,6 +95,8 @@ class AssemblyAIAdapter:
             "speaker_labels": request.speaker_labels,
             "speech_models": [speech_model],
         }
+        if speech_model == _STT_3_7:
+            payload.update(disfluencies=False, format_text=True)
         if request.language is not None:
             payload["language_code"] = request.language
         if request.prompt is not None:

@@ -192,7 +192,8 @@ class TestIdentity:
 
     def test_assemblyai_and_groq_whisper_models_are_catalogued_as_audio(self) -> None:
         expected = {
-            "assemblyai-universal-3-pro": ("assemblyai", "0.0035", False),
+            "assemblyai-stt-3-7": ("assemblyai", "0.0035", False),
+            "assemblyai-universal-3-pro": ("assemblyai", "0.0035", True),
             "assemblyai-universal-2": ("assemblyai", "0.0025", False),
             "whisper-large-v3-turbo": (
                 "groq",
@@ -565,8 +566,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-11-18.1"
-    PRICE_FINGERPRINT = "bc58676d2777ffc4b70d073a7e5486f636745ed9e265584c1c318d0b10de1eed"
+    PRICED_AT_VERSION = "2026-11-19"
+    PRICE_FINGERPRINT = "8e950dc1494235e0705939ad8581798cf350b82fc102a5564553083915e16111"
 
     @staticmethod
     def _fingerprint() -> str:

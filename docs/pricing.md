@@ -249,7 +249,12 @@ The built-in catalogue currently includes:
 |---|---:|---:|
 | OpenAI `gpt-transcribe` | `$0.0045` / minute | none |
 | Groq Whisper | `$0.02`–`$0.111` / hour | 10 seconds |
+| AssemblyAI-STT-3.7 | `$0.21` / hour | none |
 | AssemblyAI Universal | `$0.15`–`$0.21` / hour | none |
+
+AssemblyAI rates in the built-in catalogue cover base transcription.
+AssemblyAI-STT-3.7 bills contextual prompting and speaker diarization
+separately. [AssemblyAI pricing](https://www.assemblyai.com/pricing)
 
 A provider-reported duration produces an `ACTUAL` amount. When the provider
 omits duration but the caller supplied `AudioInput.duration_seconds`, the
