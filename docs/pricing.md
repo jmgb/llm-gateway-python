@@ -334,6 +334,7 @@ Video is billed per second, and the rate depends on the resolution:
 | `wan-video/wan-2.2-5b-fast` | Replicate | *no published rate* |
 | `kwaivgi/kling-v3-video` | Replicate | *no verified rate* |
 | `minimax-h3-chili-text-to-video` | Venice | *billed per clip, not linearly per second* |
+| `minimax-h3-chili-image-to-video` | Venice | *billed per clip, not linearly per second* |
 
 Seedance 2.5 publishes two rate cards, and only the cheaper one is catalogued:
 passing a reference video costs about four times as much, and `VideoRequest`
@@ -343,8 +344,10 @@ arrive with it, or every such clip is billed at a quarter of its price.
 MiniMax H3 Chili on Venice has one tier, 768p, and a price per clip length
 that no per-second rate reproduces. Venice's `/video/quote` answered, on
 2026-11-21: `$0.12` for 4s, `$0.15` for 5s, `$0.35` for 10s and `$0.60` for
-15s — from three cents a second to four. Catalogue one rate and every clip but
-one is mispriced, so none is catalogued and the cost reports `UNAVAILABLE`.
+15s — from three cents a second to four. Its image-to-video variant is
+dearer at every length: `$0.13`, `$0.17`, `$0.40` and `$0.69`. Catalogue one
+rate and every clip but one is mispriced, so none is catalogued and the cost
+reports `UNAVAILABLE`.
 `VideoUsage.seconds` is still exact, so a `VideoPriceCatalog` of your own can
 price it once you choose how.
 
@@ -368,6 +371,7 @@ offers, and anything above it has to be named:
 | `kwaivgi/kling-v3-video` | `pro` (1080p) | `standard` (720p) |
 | `bytedance/seedance-2.5` | `720p` | `480p` |
 | `minimax-h3-chili-text-to-video` | required | `768P` (its only tier) and `4s`, the shortest clip |
+| `minimax-h3-chili-image-to-video` | required | `768P` (its only tier) and `4s`, the shortest clip |
 
 Every one of those providers defaults to something dearer than its floor, so
 the request that says nothing is exactly the one that would quietly cost the

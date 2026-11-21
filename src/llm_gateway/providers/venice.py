@@ -17,6 +17,7 @@ Two facts about Venice shape every request:
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
@@ -24,7 +25,7 @@ from typing import Any, cast
 from llm_gateway.capabilities import ProviderCapabilities
 from llm_gateway.contracts import LLMRequest, ResponseFormat
 from llm_gateway.errors import ConfigurationError, LLMGatewayError, ProviderError
-from llm_gateway.media import GeneratedVideo, ProviderVideoResponse, VideoRequest
+from llm_gateway.media import GeneratedVideo, ImageInput, ProviderVideoResponse, VideoRequest
 from llm_gateway.providers._polling import read_status
 from llm_gateway.providers.base import ProviderResponse
 from llm_gateway.providers.chat_completions import token_usage as _usage
@@ -50,8 +51,9 @@ CAPABILITIES = ProviderCapabilities(
     # prose where a call was expected.
     function_calling=False,
     video_generation=True,
-    # Only the text-to-video variant is catalogued; a first frame is refused.
-    video_from_image=False,
+    # Per model: the text-to-video variant refuses a first frame, the
+    # image-to-video one requires it.
+    video_from_image=True,
     conversation_history=True,
     reports_token_usage=True,
 )
@@ -72,6 +74,8 @@ class _VideoShape:
     durations: range
     """Whole seconds. Venice requires one on every request and bills by it."""
     aspect_ratios: tuple[str, ...]
+    """Empty when the first frame decides the shape."""
+    takes_first_frame: bool = False
 
 
 _VIDEO_SHAPES = {
@@ -79,6 +83,12 @@ _VIDEO_SHAPES = {
         resolution="768P",
         durations=range(4, 16),
         aspect_ratios=("16:9", "21:9", "4:3", "1:1", "3:4", "9:16"),
+    ),
+    "minimax-h3-chili-image-to-video": _VideoShape(
+        resolution="768P",
+        durations=range(4, 16),
+        aspect_ratios=(),
+        takes_first_frame=True,
     ),
 }
 
@@ -191,7 +201,9 @@ class VeniceAdapter:
             raise ConfigurationError(
                 "Venice video is awaited, not announced; it cannot register a webhook"
             )
-        if request.image is not None:
+        if shape.takes_first_frame and request.image is None:
+            raise ConfigurationError(f"{model} requires a first frame")
+        if not shape.takes_first_frame and request.image is not None:
             raise ConfigurationError(f"{model} is text-to-video and takes no first frame")
         if request.resolution is not None and request.resolution.upper() != shape.resolution:
             raise ConfigurationError(
@@ -206,6 +218,10 @@ class VeniceAdapter:
                 f"{model} accepts a duration of {shape.durations.start} to "
                 f"{shape.durations.stop - 1} seconds, not {seconds}"
             )
+        if request.aspect_ratio is not None and not shape.aspect_ratios:
+            raise ConfigurationError(
+                f"{model} takes its shape from the first frame, not an aspect ratio"
+            )
         if request.aspect_ratio is not None and request.aspect_ratio not in shape.aspect_ratios:
             raise ConfigurationError(
                 f"{model} offers aspect ratios {', '.join(shape.aspect_ratios)}, "
@@ -219,6 +235,8 @@ class VeniceAdapter:
         }
         if request.aspect_ratio is not None:
             payload["aspect_ratio"] = request.aspect_ratio
+        if request.image is not None:
+            payload["image_url"] = _image_reference(request.image)
 
         try:
             queued = await self._client.post("/video/queue", json=payload)
@@ -272,6 +290,15 @@ def _messages(request: LLMRequest) -> list[dict[str, Any]]:
         messages.append({"role": "system", "content": system_prompt})
     messages.extend({"role": m.role, "content": m.content} for m in request.messages)
     return messages
+
+
+def _image_reference(image: ImageInput) -> str:
+    """A URL as given, or bytes as a data URI, both of which Venice accepts."""
+    if image.url is not None:
+        return image.url
+    assert image.data is not None  # guaranteed by ImageInput validation
+    encoded = base64.b64encode(image.data).decode("ascii")
+    return f"data:{image.mime_type or 'image/png'};base64,{encoded}"
 
 
 def _without_unsupported_keys(node: Any) -> Any:

@@ -9,6 +9,21 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+### Added
+
+- `minimax-h3-chili-image-to-video` on Venice animates a first frame, sent as
+  the URL given or as a data URI from bytes, so Venice now declares
+  `video_from_image=True`. It takes the frame's shape and refuses an
+  `aspect_ratio`, and shares the text variant's 768P tier and 4-second floor.
+- Catalogue `venice-uncensored-role-play` at `$0.50` / `$2.00`.
+
+### Changed
+
+- **Cost-affecting:** catalogue version `2026-11-21.1` adds the role-play
+  rate. The image-to-video model is priced per clip, from USD 0.13 for 4s to
+  0.69 for 15s, so like its text sibling it carries no rate and reports
+  `UNAVAILABLE`.
+
 ## [0.24.0] — 2026-11-21
 
 ### Added

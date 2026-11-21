@@ -90,6 +90,7 @@ class TestTheDocumentedDefaultResolution:
         "kwaivgi/kling-v3-video": "720p",
         "bytedance/seedance-2.5": "480p",
         "minimax-h3-chili-text-to-video": "768p",
+        "minimax-h3-chili-image-to-video": "768p",
     }
 
     def test_every_video_model_the_docs_promise_a_floor_for_has_one(self) -> None:

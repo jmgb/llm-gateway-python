@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-11-21"
+CATALOG_VERSION = "2026-11-21.1"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -905,6 +905,13 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         notes="Dolphin Mistral 24B Venice Edition, uncensored; no reasoning",
     ),
     _m(
+        "venice-uncensored-role-play",
+        "venice",
+        "0.50",
+        "2.00",
+        notes="dphnAI 24B 3.2 RP, uncensored and tuned for role play; no reasoning",
+    ),
+    _m(
         "minimax-h3-chili-text-to-video",
         "venice",
         "0",
@@ -913,6 +920,19 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         "always on. Billed per clip and not linearly per second — Venice quotes "
         "USD 0.12 for 4s, 0.15 for 5s, 0.35 for 10s and 0.60 for 15s — so no "
         "per-second rate is catalogued and cost reports UNAVAILABLE",
+        supports_temperature=False,
+        pricing_unit="video_seconds",
+        modality="video",
+    ),
+    _m(
+        "minimax-h3-chili-image-to-video",
+        "venice",
+        "0",
+        "0",
+        notes="uncensored MiniMax H3 animating a first frame, URL or bytes: 4-15s "
+        "at 768p, shaped by the frame, audio always on. Billed per clip — Venice "
+        "quotes USD 0.13 for 4s, 0.17 for 5s, 0.40 for 10s and 0.69 for 15s — so "
+        "no per-second rate is catalogued and cost reports UNAVAILABLE",
         supports_temperature=False,
         pricing_unit="video_seconds",
         modality="video",

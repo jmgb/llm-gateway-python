@@ -20,6 +20,7 @@ from llm_gateway.errors import InvalidRequestError, ProviderTimeoutError
 from llm_gateway.providers.venice import VeniceAdapter
 
 CHILI = "minimax-h3-chili-text-to-video"
+CHILI_I2V = "minimax-h3-chili-image-to-video"
 DEEPSEEK = "deepseek-v4-1-flash-1017-uncensored"
 
 
@@ -343,7 +344,67 @@ class TestVeniceVideo:
                 _video(), model=CHILI
             )
 
-    async def test_image_generation_is_not_offered(self) -> None:
+    async def test_image_generation_is_not_offered_but_animating_a_frame_is(self) -> None:
         assert VeniceAdapter.capabilities.image_generation is False
         assert VeniceAdapter.capabilities.video_generation is True
-        assert VeniceAdapter.capabilities.video_from_image is False
+        assert VeniceAdapter.capabilities.video_from_image is True
+
+
+class TestVeniceImageToVideo:
+    async def test_a_first_frame_url_travels_as_image_url(self) -> None:
+        client = FakeVeniceClient({"model": CHILI_I2V, "queue_id": "q-2"}, b"mp4")
+
+        response = await VeniceAdapter(client, poll_interval_seconds=0.0).generate_video(
+            _video(
+                model=CHILI_I2V,
+                image=ImageInput(url="https://cdn.test/frame.png"),
+                duration_seconds=6,
+            ),
+            model=CHILI_I2V,
+        )
+
+        assert client.posted[0] == (
+            "/video/queue",
+            {
+                "model": CHILI_I2V,
+                "prompt": "slow aerial shot over a misty valley",
+                "duration": "6s",
+                "resolution": "768P",
+                "image_url": "https://cdn.test/frame.png",
+            },
+        )
+        assert client.posted[1] == ("/video/retrieve", {"model": CHILI_I2V, "queue_id": "q-2"})
+        assert response.usage.seconds == 6.0
+
+    async def test_a_first_frame_in_bytes_travels_as_a_data_uri(self) -> None:
+        """So a frame from another provider is animated without hosting it first."""
+        client = FakeVeniceClient({"model": CHILI_I2V, "queue_id": "q-2"}, b"mp4")
+
+        await VeniceAdapter(client, poll_interval_seconds=0.0).generate_video(
+            _video(model=CHILI_I2V, image=ImageInput(data=b"\x89PNG", mime_type="image/png")),
+            model=CHILI_I2V,
+        )
+
+        assert client.posted[0][1]["image_url"] == "data:image/png;base64,iVBORw=="
+
+    @pytest.mark.parametrize(
+        ("options", "message"),
+        [
+            ({}, "first frame"),
+            (
+                {"image": ImageInput(url="https://cdn.test/f.png"), "aspect_ratio": "9:16"},
+                "aspect ratio",
+            ),
+        ],
+    )
+    async def test_what_the_image_model_cannot_honour_raises_before_anything_is_paid(
+        self, options: dict[str, Any], message: str
+    ) -> None:
+        client = FakeVeniceClient()
+
+        with pytest.raises(ConfigurationError, match=message):
+            await VeniceAdapter(client).generate_video(
+                _video(model=CHILI_I2V, **options), model=CHILI_I2V
+            )
+
+        assert client.posted == []
