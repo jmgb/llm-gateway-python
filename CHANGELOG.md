@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-11-21
+
 ### Added
 
 - **Venice is a provider**, behind the `venice` extra, `create_venice_client()`
