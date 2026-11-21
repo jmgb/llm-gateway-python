@@ -9,6 +9,8 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-11-21
+
 ### Added
 
 - `minimax-h3-chili-image-to-video` on Venice animates a first frame, sent as
