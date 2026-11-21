@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from llm_gateway.errors import LLMGatewayError
 from llm_gateway.providers.error_mapping import classify_provider_error
@@ -22,12 +21,12 @@ from llm_gateway.providers.error_mapping import classify_provider_error
 TOLERATED_STATUS_ERRORS = 2
 
 
-async def read_status(
-    get: Callable[[str], Awaitable[dict[str, Any]]],
+async def read_status[Status](
+    get: Callable[[str], Awaitable[Status]],
     path: str,
     *,
     interval_seconds: float,
-) -> dict[str, Any]:
+) -> Status:
     """GET ``path``, retrying only transient failures, at most a few in a row."""
     failures = 0
     while True:

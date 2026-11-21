@@ -37,6 +37,7 @@ from llm_gateway.providers.gemini import GeminiAdapter
 from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.openrouter import OpenRouterAdapter
+from llm_gateway.providers.venice import VeniceAdapter
 
 INPUT_TOKENS = 10
 OUTPUT_TOKENS = 5
@@ -94,6 +95,19 @@ def _chat_completions_client(texts: list[str]) -> Any:
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
 
+def _venice_client(texts: list[str]) -> Any:
+    """Venice's REST client hands back the decoded JSON body, not SDK objects."""
+
+    async def post(path: str, *, json: dict[str, Any]) -> Any:
+        return {
+            "choices": [{"message": {"content": texts.pop(0)}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": INPUT_TOKENS, "completion_tokens": OUTPUT_TOKENS},
+            "model": json["model"],
+        }
+
+    return SimpleNamespace(post=post)
+
+
 @dataclass(frozen=True)
 class ProviderCase:
     """One provider, its fake transport, and two models it really serves."""
@@ -128,6 +142,12 @@ CASES: dict[str, ProviderCase] = {
         client=_chat_completions_client,
         primary="deepseek/deepseek-v4-flash",
         fallback="deepseek/deepseek-v4-pro",
+    ),
+    "venice": ProviderCase(
+        adapter=VeniceAdapter,
+        client=_venice_client,
+        primary="deepseek-v4-1-flash-1017-uncensored",
+        fallback="venice-uncensored-1-2",
     ),
 }
 

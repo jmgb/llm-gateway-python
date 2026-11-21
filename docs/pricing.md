@@ -155,6 +155,7 @@ Providers disagree here, so each adapter normalises at its boundary:
 | AssemblyAI | no token usage; duration belongs to the audio contract | kept out of token pricing |
 | Replicate | no token usage; images are billed per run | kept out of token pricing |
 | WaveSpeed | no token usage; images are billed per image, video per second | kept out of token pricing |
+| Venice (Chat Completions) | `completion_tokens_details.reasoning_tokens`, already inside `completion_tokens` — confirmed against the `cost` Venice returns with each reply | passed through; video has no token usage and is kept out of token pricing |
 
 Adding the breakdown back on top of the total is a real bug this package had:
 at a thinking effort where reasoning dominates the visible answer, it
@@ -332,11 +333,20 @@ Video is billed per second, and the rate depends on the resolution:
 | `bytedance/seedance-2.5` | Replicate | `$0.1028` at 480p, `$0.2312` at 720p |
 | `wan-video/wan-2.2-5b-fast` | Replicate | *no published rate* |
 | `kwaivgi/kling-v3-video` | Replicate | *no verified rate* |
+| `minimax-h3-chili-text-to-video` | Venice | *billed per clip, not linearly per second* |
 
 Seedance 2.5 publishes two rate cards, and only the cheaper one is catalogued:
 passing a reference video costs about four times as much, and `VideoRequest`
 has no field that sends one. If that ever changes, the dearer card has to
 arrive with it, or every such clip is billed at a quarter of its price.
+
+MiniMax H3 Chili on Venice has one tier, 768p, and a price per clip length
+that no per-second rate reproduces. Venice's `/video/quote` answered, on
+2026-11-21: `$0.12` for 4s, `$0.15` for 5s, `$0.35` for 10s and `$0.60` for
+15s — from three cents a second to four. Catalogue one rate and every clip but
+one is mispriced, so none is catalogued and the cost reports `UNAVAILABLE`.
+`VideoUsage.seconds` is still exact, so a `VideoPriceCatalog` of your own can
+price it once you choose how.
 
 `StaticVideoPriceCatalog` prices `VideoUsage.seconds` at the rate for
 `VideoUsage.resolution`. A resolution the table does not know yields
@@ -357,6 +367,7 @@ offers, and anything above it has to be named:
 | `wan-video/wan-2.2-5b-fast` | `720p` | `480p` |
 | `kwaivgi/kling-v3-video` | `pro` (1080p) | `standard` (720p) |
 | `bytedance/seedance-2.5` | `720p` | `480p` |
+| `minimax-h3-chili-text-to-video` | required | `768P` (its only tier) and `4s`, the shortest clip |
 
 Every one of those providers defaults to something dearer than its floor, so
 the request that says nothing is exactly the one that would quietly cost the

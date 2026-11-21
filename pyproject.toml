@@ -13,6 +13,7 @@ keywords = [
     "gemini",
     "groq",
     "openrouter",
+    "venice",
     "cost-accounting",
     "retry",
     "fallback",
@@ -39,6 +40,9 @@ assemblyai = ["httpx2>=2.12.0,<3"]
 replicate = ["replicate>=1.0,<2"]
 # WaveSpeed ships no SDK either: the adapter speaks its REST API over httpx2.
 wavespeed = ["httpx2>=2.12.0,<3"]
+# Venice speaks the OpenAI chat format, but its video API is its own, so one
+# small REST client over httpx2 carries both.
+venice = ["httpx2>=2.12.0,<3"]
 # OpenRouter ships no SDK: it speaks the OpenAI wire format. The extra exists
 # so that installing it is named after the provider a consumer actually wants.
 openrouter = ["openai>=2.54,<4"]

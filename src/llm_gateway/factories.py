@@ -21,6 +21,7 @@ from llm_gateway.providers.groq import GroqAdapter
 from llm_gateway.providers.openai import OpenAIAdapter
 from llm_gateway.providers.openrouter import OpenRouterAdapter
 from llm_gateway.providers.replicate import ReplicateAdapter
+from llm_gateway.providers.venice import VENICE_BASE_URL, VeniceAdapter, VeniceHttpClient
 from llm_gateway.providers.wavespeed import WaveSpeedAdapter, WaveSpeedHttpClient
 from llm_gateway.registry import ProviderRegistry
 
@@ -46,6 +47,10 @@ IMAGE_MODEL_PREFIXES: tuple[str, ...] = ()
 (``bytedance/``, ``prunaai/``) that say nothing about who serves them, so their
 models route by catalogue entry only. Registering an uncatalogued slug is the
 application's call: ``registry.register(adapter, model_prefixes=("prunaai/",))``."""
+VENICE_MODEL_PREFIXES: tuple[str, ...] = ()
+"""Empty for the same reason: Venice serves ``deepseek-...`` and ``minimax-...``
+ids that name the model's maker, not Venice, so only the catalogue can place
+them."""
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -147,6 +152,16 @@ def create_wavespeed_client(*, api_key: str) -> Any:
     return WaveSpeedHttpClient(api_key=api_key)
 
 
+def create_venice_client(*, api_key: str, base_url: str = VENICE_BASE_URL) -> Any:
+    """Build the small REST client used by the Venice adapter."""
+    _require_key(api_key)
+    try:
+        __import__("httpx2")
+    except ImportError as error:
+        raise ProviderNotInstalled.for_provider("venice") from error
+    return VeniceHttpClient(api_key=api_key, base_url=base_url)
+
+
 def build_registry(
     *,
     openai_client: Any | None = None,
@@ -156,6 +171,7 @@ def build_registry(
     assemblyai_client: Any | None = None,
     replicate_client: Any | None = None,
     wavespeed_client: Any | None = None,
+    venice_client: Any | None = None,
     extra_openai_prefixes: tuple[str, ...] = (),
 ) -> ProviderRegistry:
     """Register the adapters for the clients the application supplies.
@@ -186,6 +202,8 @@ def build_registry(
         registry.register(ReplicateAdapter(replicate_client), model_prefixes=IMAGE_MODEL_PREFIXES)
     if wavespeed_client is not None:
         registry.register(WaveSpeedAdapter(wavespeed_client), model_prefixes=IMAGE_MODEL_PREFIXES)
+    if venice_client is not None:
+        registry.register(VeniceAdapter(venice_client), model_prefixes=VENICE_MODEL_PREFIXES)
 
     if not registry.provider_names:
         raise ValueError("build_registry needs at least one client")

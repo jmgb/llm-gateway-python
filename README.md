@@ -70,9 +70,9 @@ pip install "neutral-llm-gateway[gemini]"
 ```
 
 Available extras: `openai`, `gemini`, `groq`, `assemblyai`, `openrouter`,
-`replicate`, `wavespeed`, `all`. Combine them as `[openai,assemblyai]`.
-`openrouter` installs the `openai` SDK, and `assemblyai` and `wavespeed`
-install the small HTTP transport used by their REST adapters.
+`replicate`, `wavespeed`, `venice`, `all`. Combine them as `[openai,assemblyai]`.
+`openrouter` installs the `openai` SDK, and `assemblyai`, `wavespeed` and
+`venice` install the small HTTP transport used by their REST adapters.
 
 Importing the package with no extra installed works by design; asking for a
 provider you have not installed raises a typed error naming the exact extra.
@@ -328,6 +328,13 @@ The first frame may be bytes or a URL — WaveSpeed accepts an inline data URI,
 which is what lets an image from one provider be animated by another without
 hosting it anywhere first.
 
+Venice's `minimax-h3-chili-text-to-video` is the uncensored text-to-video
+model: build the registry with `venice_client=create_venice_client(api_key=...)`
+and send no `image`. It usually hands the finished clip back as MP4 bytes, so
+read `result.videos[0].data` and expect `.url` only when Venice announced a
+download link. It also needs a duration, so a request that states none gets
+the 4-second clip, its cheapest.
+
 A clip takes minutes, so `VideoRequest` defaults to a fifteen-minute total
 budget and the adapter owns the provider's polling loop. Resolution is part of
 usage rather than a detail of the request because the rate depends on it: a
@@ -567,6 +574,7 @@ that application's local adapter.
 | OpenRouter | `[openrouter]` | Chat Completions. Aggregator: declares the floor every route honours, not the best case |
 | Replicate | `[replicate]` | Image generation and editing, plus video as a submitted job. Answers with a URL, and fetches the source image from one |
 | WaveSpeed | `[wavespeed]` | REST submit/poll. Text-to-image, and image-to-video billed per second |
+| Venice | `[venice]` | REST. Chat Completions with schema enforcement, and text-to-video as queue and retrieve. Serves uncensored models; switches off the system prompt Venice would otherwise prepend |
 
 Capabilities are declared per provider and never faked as identical — query
 `adapter.capabilities` before relying on one.
@@ -612,7 +620,9 @@ and OpenAI, Gemini, Replicate and WaveSpeed expose `image_generation=True`
 through `ImageRequest`. WaveSpeed and Replicate both declare `video_generation=True`
 and `video_from_image=True`, reached through `VideoRequest` — WaveSpeed by
 awaiting `generate_video()`, Replicate through `submit_video()` and
-`poll_video()`. Only Replicate declares `video_webhooks=True`, so an
+`poll_video()`. Venice declares `video_generation=True` only: its catalogued
+model, `minimax-h3-chili-text-to-video`, is text-to-video and refuses a first
+frame. Only Replicate declares `video_webhooks=True`, so an
 application can ask whether it must poll before committing to a design.
 
 Request options are adapted per model before each API attempt. A model that

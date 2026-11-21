@@ -50,6 +50,11 @@ NATIVE_PAYLOADS: dict[str, Any] = {
         completion_tokens=OUTPUT_TOKENS,
         completion_tokens_details=SimpleNamespace(reasoning_tokens=REASONING_TOKENS),
     ),
+    "venice": SimpleNamespace(
+        prompt_tokens=INPUT_TOKENS,
+        completion_tokens=OUTPUT_TOKENS,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=REASONING_TOKENS),
+    ),
 }
 
 
@@ -114,6 +119,11 @@ INCONSISTENT_PAYLOADS: dict[str, Any] = {
         completion_tokens_details=SimpleNamespace(reasoning_tokens=OUTPUT_TOKENS + 1),
     ),
     "openrouter": SimpleNamespace(
+        prompt_tokens=INPUT_TOKENS,
+        completion_tokens=OUTPUT_TOKENS,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=OUTPUT_TOKENS + 1),
+    ),
+    "venice": SimpleNamespace(
         prompt_tokens=INPUT_TOKENS,
         completion_tokens=OUTPUT_TOKENS,
         completion_tokens_details=SimpleNamespace(reasoning_tokens=OUTPUT_TOKENS + 1),

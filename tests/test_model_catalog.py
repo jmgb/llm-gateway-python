@@ -235,6 +235,7 @@ class TestIdentity:
             "assemblyai",
             "replicate",
             "wavespeed",
+            "venice",
         }
 
         for model_id, info in MODEL_CATALOG.items():
@@ -566,8 +567,8 @@ class TestPricesAndVersionMoveTogether:
     here in the same commit.
     """
 
-    PRICED_AT_VERSION = "2026-11-19"
-    PRICE_FINGERPRINT = "8e950dc1494235e0705939ad8581798cf350b82fc102a5564553083915e16111"
+    PRICED_AT_VERSION = "2026-11-21"
+    PRICE_FINGERPRINT = "72bd376e378e04992425d37482a4bb26029142d787cef823fa15c505a5adf406"
 
     @staticmethod
     def _fingerprint() -> str:

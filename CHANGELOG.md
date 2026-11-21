@@ -11,6 +11,18 @@ consumer pins an immutable tag and upgrades through its own pull request.
 
 ### Added
 
+- **Venice is a provider**, behind the `venice` extra, `create_venice_client()`
+  and `build_registry(venice_client=...)`. Chat Completions go over a small
+  REST client with Venice's strict `json_schema` enforcement. The adapter
+  switches off the system prompt Venice prepends by default, which adds about
+  1500 unrequested tokens to every call, and strips `uniqueItems`, which
+  Venice's grammar rejects. Tools and visual inputs are refused. Video
+  queues on `/video/queue` and polls `/video/retrieve` until the MP4 arrives,
+  usually as bytes.
+- Catalogue `deepseek-v4-1-flash-1017-uncensored` (`$0.33` / `$1.32`),
+  `venice-uncensored-1-2` (`$0.20` / `$0.90`) and the uncensored
+  `minimax-h3-chili-text-to-video`. The video model sends its only tier,
+  `768P`, and the 4-second floor when no duration is stated.
 - Support `assemblyai-stt-3-7` for pre-recorded audio with contextual prompts
   and speaker diarization. The adapter requests formatted text and removes
   disfluencies.
@@ -20,6 +32,9 @@ consumer pins an immutable tag and upgrades through its own pull request.
 - **Cost-affecting:** catalogue version `2026-11-19` adds the model's base
   rate of USD 0.21 per audio hour. Universal-3 Pro is marked deprecated and
   remains callable.
+- **Cost-affecting:** catalogue version `2026-11-21` adds the Venice rates
+  above. MiniMax H3 Chili is priced per clip and not linearly per second, so it
+  carries no rate and its cost reports `UNAVAILABLE`.
 
 ## [0.23.0] — 2026-11-17
 

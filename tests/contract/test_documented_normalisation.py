@@ -89,14 +89,16 @@ class TestTheDocumentedDefaultResolution:
         "wan-video/wan-2.2-5b-fast": "480p",
         "kwaivgi/kling-v3-video": "720p",
         "bytedance/seedance-2.5": "480p",
+        "minimax-h3-chili-text-to-video": "768p",
     }
 
     def test_every_video_model_the_docs_promise_a_floor_for_has_one(self) -> None:
+        from llm_gateway.providers import venice, wavespeed
         from llm_gateway.providers.replicate import _VIDEO_SHAPES
-        from llm_gateway.providers.wavespeed import _LOWEST_RESOLUTION
 
         declared = {model: shape.default_resolution for model, shape in _VIDEO_SHAPES.items()}
-        declared.update(_LOWEST_RESOLUTION)
+        declared.update(wavespeed._LOWEST_RESOLUTION)
+        declared.update(venice._LOWEST_RESOLUTION)
 
         assert declared == self.DOCUMENTED
 

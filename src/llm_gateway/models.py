@@ -23,7 +23,7 @@ from typing import Literal
 from llm_gateway.contracts import ReasoningEffort
 from llm_gateway.pricing import AudioRate, ImageRate, ModelRate, VideoRate
 
-CATALOG_VERSION = "2026-11-19"
+CATALOG_VERSION = "2026-11-21"
 """Bump on every price change. Recorded alongside every amount."""
 
 Provider = str
@@ -883,6 +883,39 @@ _ENTRIES: tuple[ModelInfo, ...] = (
         pricing_unit="images",
         modality="image",
         image_price="0.015",
+    ),
+    # ---- Venice -----------------------------------------------------------
+    # Rates read from Venice's `/models` on 2026-11-21. Uncensored weights are
+    # a property of the model, not a licence: Venice's terms still apply.
+    _m(
+        "deepseek-v4-1-flash-1017-uncensored",
+        "venice",
+        "0.33",
+        "1.32",
+        notes="DeepSeek V4.1 Flash with refusals edited out of the weights. Thinks "
+        "at Venice's default effort, which this package does not set; reasoning "
+        "is reported inside completion_tokens. Cache reads are USD 0.00825/M, "
+        "priced here at the full input rate",
+    ),
+    _m(
+        "venice-uncensored-1-2",
+        "venice",
+        "0.20",
+        "0.90",
+        notes="Dolphin Mistral 24B Venice Edition, uncensored; no reasoning",
+    ),
+    _m(
+        "minimax-h3-chili-text-to-video",
+        "venice",
+        "0",
+        "0",
+        notes="uncensored MiniMax H3, text-to-video only: 4-15s at 768p, audio "
+        "always on. Billed per clip and not linearly per second — Venice quotes "
+        "USD 0.12 for 4s, 0.15 for 5s, 0.35 for 10s and 0.60 for 15s — so no "
+        "per-second rate is catalogued and cost reports UNAVAILABLE",
+        supports_temperature=False,
+        pricing_unit="video_seconds",
+        modality="video",
     ),
 )
 

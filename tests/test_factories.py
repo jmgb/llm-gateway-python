@@ -15,6 +15,7 @@ from llm_gateway.factories import (
     create_openai_client,
     create_openrouter_client,
     create_replicate_client,
+    create_venice_client,
     create_wavespeed_client,
 )
 
@@ -110,6 +111,31 @@ def test_the_wavespeed_client_carries_the_key_as_a_bearer_token(
     client = create_wavespeed_client(api_key="wave-key")
 
     assert client._headers == {"Authorization": "Bearer wave-key"}
+
+
+def test_the_venice_client_names_its_extra_and_sends_a_user_agent_cloudflare_accepts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cloudflare in front of Venice refuses Python HTTP clients' own agent."""
+    monkeypatch.setitem(sys.modules, "httpx2", None)
+    with pytest.raises(ProviderNotInstalled, match=r"\[venice\]"):
+        create_venice_client(api_key="unused")
+
+    monkeypatch.setitem(sys.modules, "httpx2", ModuleType("httpx2"))
+    client = create_venice_client(api_key="venice-key")
+
+    assert client._headers["Authorization"] == "Bearer venice-key"
+    assert client._headers["User-Agent"].startswith("Mozilla/5.0")
+
+
+def test_venice_models_route_to_venice_by_catalogue_entry() -> None:
+    """Their ids name the model's maker, so a prefix would misplace them."""
+    from types import SimpleNamespace
+
+    registry = build_registry(venice_client=SimpleNamespace())
+
+    assert registry.resolve("deepseek-v4-1-flash-1017-uncensored").name == "venice"
+    assert registry.resolve("minimax-h3-chili-text-to-video").name == "venice"
 
 
 def test_image_models_route_to_their_provider_without_any_prefix() -> None:
