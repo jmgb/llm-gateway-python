@@ -117,6 +117,8 @@ def test_a_video_request_requires_a_prompt_and_a_positive_duration() -> None:
         VideoRequest(model=MODEL, prompt="  ")
     with pytest.raises(ValueError, match="duration"):
         VideoRequest(model=MODEL, prompt="a lion", duration_seconds=0)
+    with pytest.raises(ValueError, match="aspect ratio"):
+        VideoRequest(model=MODEL, prompt="a lion", aspect_ratio=" ")
 
 
 def test_a_generated_video_must_carry_a_url_or_bytes() -> None:

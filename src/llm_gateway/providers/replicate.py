@@ -186,6 +186,11 @@ class ReplicateAdapter:
                 raise ConfigurationError(f"{model} has no verified resolution option")
             payload[shape.resolution_field] = _resolution_for(shape, resolution, model)
 
+        if request.aspect_ratio is not None:
+            # No video schema here was read for it, and Replicate ignores an
+            # unknown key, generates its default shape and bills it.
+            raise ConfigurationError(f"{model} has no verified aspect ratio option")
+
         create: dict[str, Any] = {"model": model, "input": payload}
         if request.webhook_url is not None:
             create["webhook"] = request.webhook_url

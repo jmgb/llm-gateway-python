@@ -335,6 +335,12 @@ read `result.videos[0].data` and expect `.url` only when Venice announced a
 download link. It also needs a duration, so a request that states none gets
 the 4-second clip, its cheapest.
 
+`VideoRequest.aspect_ratio` (`"9:16"`, `"1:1"`, …) shapes the clip on Venice,
+which lists the ratios each model accepts and charges the same for all of
+them. Unset, the provider picks. WaveSpeed and Replicate refuse it rather than
+drop it: no schema of theirs has been read for the field, and a vertical clip
+that comes back landscape is the failure nobody sees until it is published.
+
 A clip takes minutes, so `VideoRequest` defaults to a fifteen-minute total
 budget and the adapter owns the provider's polling loop. Resolution is part of
 usage rather than a detail of the request because the rate depends on it: a

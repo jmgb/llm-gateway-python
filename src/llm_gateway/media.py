@@ -214,6 +214,14 @@ class VideoRequest:
     A model whose tiers this package has not read from a published schema gets
     no default at all — an invented floor is a guess, and a rejected request.
     """
+    aspect_ratio: str | None = None
+    """The clip's shape, as ``"9:16"``; unset leaves it to the provider.
+
+    Unlike resolution it does not move the price on any model catalogued here,
+    so there is no cheap answer to default to. An adapter whose model has no
+    verified field for it refuses the option: dropping it returns a landscape
+    clip to a caller who asked for a vertical one.
+    """
     webhook_url: str | None = None
     """Where a job-shaped provider should announce that it finished.
 
@@ -239,6 +247,8 @@ class VideoRequest:
             raise ValueError("video duration must be positive")
         if self.resolution is not None and not self.resolution.strip():
             raise ValueError("resolution must be non-empty when provided")
+        if self.aspect_ratio is not None and not self.aspect_ratio.strip():
+            raise ValueError("aspect ratio must be non-empty when provided")
         if self.webhook_url is not None and not self.webhook_url.strip():
             raise ValueError("webhook url must be non-empty when provided")
 

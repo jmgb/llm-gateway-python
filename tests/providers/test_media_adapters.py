@@ -522,6 +522,20 @@ class TestWaveSpeedVideo:
 
         assert len(client.got) == 1
 
+    async def test_an_aspect_ratio_is_refused_rather_than_dropped(self) -> None:
+        """MiniMax H3 on WaveSpeed takes its shape from the first frame."""
+        client = FakeWaveSpeedVideoClient({"status": "completed", "outputs": ["x"]})
+
+        with pytest.raises(ConfigurationError, match="aspect ratio"):
+            await WaveSpeedAdapter(client, poll_interval_seconds=0.0).generate_video(
+                _video_request(
+                    image=ImageInput(url="https://cdn.test/lion.png"), aspect_ratio="9:16"
+                ),
+                model="wavespeed-ai/minimax-h3/image-to-video",
+            )
+
+        assert client.posted == []
+
 
 WAN = "wan-video/wan-2.2-5b-fast"
 
@@ -643,6 +657,17 @@ class TestReplicateVideoSubmission:
         with pytest.raises(ConfigurationError, match="duration"):
             await ReplicateAdapter(client).submit_video(
                 _video_request(model=WAN, duration_seconds=5), model=WAN
+            )
+
+        assert client.predictions.created == []
+
+    async def test_an_aspect_ratio_no_verified_schema_accepts_is_refused(self) -> None:
+        """Replicate ignores keys it does not know, generates its default and bills it."""
+        client = _client(_prediction())
+
+        with pytest.raises(ConfigurationError, match="aspect ratio"):
+            await ReplicateAdapter(client).submit_video(
+                _video_request(model=WAN, aspect_ratio="9:16"), model=WAN
             )
 
         assert client.predictions.created == []

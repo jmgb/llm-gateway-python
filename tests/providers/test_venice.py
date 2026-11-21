@@ -235,10 +235,28 @@ class TestVeniceVideo:
 
         assert client.posted[0][1]["resolution"] == "768P"
 
+    async def test_an_aspect_ratio_the_model_lists_is_sent_as_given(self) -> None:
+        """Vertical for social is the reason the field exists; it does not move the price."""
+        client = FakeVeniceClient(QUEUED, b"mp4")
+
+        await VeniceAdapter(client, poll_interval_seconds=0.0).generate_video(
+            _video(aspect_ratio="9:16"), model=CHILI
+        )
+
+        assert client.posted[0][1]["aspect_ratio"] == "9:16"
+
+    async def test_an_unstated_aspect_ratio_is_not_sent(self) -> None:
+        client = FakeVeniceClient(QUEUED, b"mp4")
+
+        await VeniceAdapter(client, poll_interval_seconds=0.0).generate_video(_video(), model=CHILI)
+
+        assert "aspect_ratio" not in client.posted[0][1]
+
     @pytest.mark.parametrize(
         ("options", "message"),
         [
             ({"resolution": "1080p"}, "resolution"),
+            ({"aspect_ratio": "2:3"}, "aspect ratio"),
             ({"duration_seconds": 3}, "duration"),
             ({"duration_seconds": 16}, "duration"),
             ({"image": ImageInput(url="https://cdn.test/frame.png")}, "first frame"),

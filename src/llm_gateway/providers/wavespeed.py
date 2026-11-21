@@ -144,6 +144,10 @@ class WaveSpeedAdapter:
             raise ConfigurationError(
                 "WaveSpeed video is awaited, not announced; it cannot register a webhook"
             )
+        if request.aspect_ratio is not None:
+            raise ConfigurationError(
+                f"{model} takes its shape from the first frame, not an aspect ratio"
+            )
         if model.endswith("/image-to-video") and request.image is None:
             raise ConfigurationError(f"{model} requires a first frame")
         payload: dict[str, Any] = {"prompt": request.prompt}

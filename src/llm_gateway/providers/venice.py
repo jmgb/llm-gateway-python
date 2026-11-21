@@ -71,10 +71,15 @@ class _VideoShape:
     """The only tier, spelt as the API demands: `768P`, never `768p`."""
     durations: range
     """Whole seconds. Venice requires one on every request and bills by it."""
+    aspect_ratios: tuple[str, ...]
 
 
 _VIDEO_SHAPES = {
-    "minimax-h3-chili-text-to-video": _VideoShape(resolution="768P", durations=range(4, 16)),
+    "minimax-h3-chili-text-to-video": _VideoShape(
+        resolution="768P",
+        durations=range(4, 16),
+        aspect_ratios=("16:9", "21:9", "4:3", "1:1", "3:4", "9:16"),
+    ),
 }
 
 # The cheapest tier each video model offers, in the gateway's lower-case
@@ -201,12 +206,19 @@ class VeniceAdapter:
                 f"{model} accepts a duration of {shape.durations.start} to "
                 f"{shape.durations.stop - 1} seconds, not {seconds}"
             )
+        if request.aspect_ratio is not None and request.aspect_ratio not in shape.aspect_ratios:
+            raise ConfigurationError(
+                f"{model} offers aspect ratios {', '.join(shape.aspect_ratios)}, "
+                f"not {request.aspect_ratio!r}"
+            )
         payload = {
             "model": model,
             "prompt": request.prompt,
             "duration": f"{seconds}s",
             "resolution": shape.resolution,
         }
+        if request.aspect_ratio is not None:
+            payload["aspect_ratio"] = request.aspect_ratio
 
         try:
             queued = await self._client.post("/video/queue", json=payload)

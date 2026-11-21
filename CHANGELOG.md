@@ -23,6 +23,10 @@ consumer pins an immutable tag and upgrades through its own pull request.
   `venice-uncensored-1-2` (`$0.20` / `$0.90`) and the uncensored
   `minimax-h3-chili-text-to-video`. The video model sends its only tier,
   `768P`, and the 4-second floor when no duration is stated.
+- `VideoRequest.aspect_ratio` sets a clip's shape. Venice sends it after
+  checking it against the model's listed ratios, which share one price. Unset,
+  the provider decides. WaveSpeed and Replicate refuse it before submitting,
+  since no video schema of theirs was verified for the field.
 - Support `assemblyai-stt-3-7` for pre-recorded audio with contextual prompts
   and speaker diarization. The adapter requests formatted text and removes
   disfluencies.
