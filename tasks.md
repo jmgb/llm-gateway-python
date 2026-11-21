@@ -77,11 +77,10 @@ tier — lives in `docs/architecture.md`.
 
 ## Consumer rollout
 
-- [ ] **Publish a release with AssemblyAI-STT-3.7.**
+- [ ] **Verify AssemblyAI-STT-3.7 from PyPI.**
 
-  Gateway support is on `origin/main` at `38e52f8`. Once authorised, follow
-  the release workflow in `CLAUDE.md`. Verify that the version installed
-  from PyPI can transcribe a public sample with `assemblyai-stt-3-7`.
+  Published in 0.24.0 on 2026-11-21. Still to check: the version installed
+  from PyPI transcribes a public sample with `assemblyai-stt-3-7`.
 
 - [ ] **Publish and deploy the 0.23.0 consumer upgrades.**
 
